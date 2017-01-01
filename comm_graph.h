@@ -5,6 +5,12 @@
  *      Author: alexma
  */
 
+#include <stdlib.h>
+#include <string.h>
+
+#define OK (0)
+#define ERROR (-1)
+
 typedef unsigned long node_id;
 
 enum comm_graph_direction_count {

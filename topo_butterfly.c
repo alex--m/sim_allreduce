@@ -32,7 +32,7 @@ int send_recursive_k_ing(
 	node_id group_size = radix;
 
 	comm_graph_t* flow = comm_graph_create(node_count, COMM_GRAPH_FLOW);
-	if (!tree) {
+	if (!flow) {
 		return NULL;
 	}
 
