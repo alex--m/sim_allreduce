@@ -43,3 +43,40 @@ comm_graph_t* comm_graph_create(unsigned long node_count,
 void comm_graph_destroy(comm_graph_t* comm_graph);
 
 int comm_graph_append(comm_graph_t* comm_graph, node_id father, node_id child);
+
+// Utility function to protect against integer overflow
+#if defined( _MSC_VER )
+__forceinline
+#endif
+size_t get_intel_flags(const size_t bitmask)
+{
+#if defined( _MSC_VER )
+    return __readeflags() & bitmask;
+#elif defined( __GNUC__ )
+    size_t flags;
+    __asm__ __volatile__(
+            "pushfq\n"
+            "pop %%rax\n"
+            "movq %%rax, %0\n"
+            :"=r"(flags)
+             :
+             :"%rax"
+    );
+    return flags & bitmask;
+#else
+#define OVERFOW_UNSUPPORTED
+#pragma message("Inline assembly not supported.")
+    return OK;
+#endif
+}
+
+#ifdef TEST_FIRST
+#define HAS_OVERFLOWN (get_intel_flags(0x801))
+    // 0x800 is signed overflow and 0x1 is carry
+#define BREAK_ON_OVERFLOW if (HAS_OVERFLOWN) break;
+#define RETURN_ON_OVERFLOW(x) if (HAS_OVERFLOWN) { printf("ERROR!!\n\n"); return (x);}
+#else
+#define HAS_OVERFLOWN (0)
+#define BREAK_ON_OVERFLOW
+#define RETURN_ON_OVERFLOW(x)
+#endif

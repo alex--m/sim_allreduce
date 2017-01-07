@@ -10,6 +10,16 @@
 
 #include <assert.h>
 
+#ifdef __linux__
+#define CYCLIC_RANDOM(spec, mod) (rand_r(&(spec)->random_seed) % (mod))
+#define FLOAT_RANDOM(spec) ((rand_r(&(spec)->random_seed)) / ((float)RAND_MAX))
+#elif _WIN32
+#define CYCLIC_RANDOM(spec, mod) (rand() % (mod))
+#define FLOAT_RANDOM(spec) (((float)rand()) / RAND_MAX)
+#else
+#error "OS not supported!"
+#endif
+
 struct topology_iterator {
 	comm_graph_t *graph;
 	comm_graph_node_t my_node;
