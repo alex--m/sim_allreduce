@@ -1,10 +1,3 @@
-/*
- * comm_graph.c
- *
- *  Created on: Dec 19, 2016
- *      Author: alexma
- */
-
 #include "comm_graph.h"
 
 #define COMM_GRAPH_DIRECTION_APPEND(node, direction, node_id) { \

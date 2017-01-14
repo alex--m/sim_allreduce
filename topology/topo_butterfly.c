@@ -1,18 +1,7 @@
-#include "comm_graph.h"
+#include "topology.h"
 
 comm_graph_t* build_recursive(unsigned node_count, unsigned radix)
 {
-	/*
-}
-int send_recursive_k_ing(
-        unsigned host_list_size,
-        unsigned my_index_in_list,
-        unsigned tree_radix,
-        int is_multiroot,
-        exchange_f target_rank_cb,
-        collective_iteration_ctx_t *ctx)
-{
-
     /*
      * Recursive K-ing (tree_radix=k):
      * For every level X - divide the ranks into groups of size k^(X-1),

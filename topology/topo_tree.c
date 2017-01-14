@@ -1,9 +1,9 @@
-#include "comm_graph.h"
+#include "topology.h"
 
-comm_graph_t* build_tree(unsigned node_count,
-						 unsigned tree_radix,
-						 int is_knomial,
-						 int is_multiroot)
+static comm_graph_t* build_tree(unsigned node_count,
+							    unsigned tree_radix,
+								int is_knomial,
+								int is_multiroot)
 {
     /*
      * N-array tree (tree_radix=k):
@@ -72,6 +72,32 @@ comm_graph_t* build_tree(unsigned node_count,
 	}
 
 	return tree;
+}
+
+int tree_build(topology_spec_t spec, comm_graph_t **graph)
+{
+	enum comm_graph_direction_count direction_count;
+
+	switch (spec->topology) {
+	case COLLECTIVE_TOPOLOGY_NARRAY_TREE:
+		direction_count = COMM_GRAPH_BIDI;
+		break;
+
+	case COLLECTIVE_TOPOLOGY_KNOMIAL_TREE:
+		direction_count = COMM_GRAPH_BIDI;
+		break;
+
+	case COLLECTIVE_TOPOLOGY_NARRAY_MULTIROOT_TREE:
+		direction_count = COMM_GRAPH_BIDI;
+		break;
+
+	case COLLECTIVE_TOPOLOGY_KNOMIAL_MULTIROOT_TREE:
+		direction_count = COMM_GRAPH_BIDI;
+		break;
+	}
+
+	*graph = comm_graph_create(spec->node_count, direction_count);
+	return (*graph != NULL) ? OK : ERROR;
 }
 
 int fix_tree(comm_graph_t* tree, node_id bad_node) {

@@ -1,10 +1,3 @@
-/*
- * comm_graph.c
- *
- *  Created on: Dec 19, 2016
- *      Author: alexma
- */
-
 #include <stdlib.h>
 #include <string.h>
 
@@ -12,6 +5,7 @@
 #define ERROR (-1)
 
 typedef unsigned long node_id;
+typedef unsigned group_id; /* each group simulates multiple nodes */
 
 enum comm_graph_direction_count {
 	COMM_GRAPH_FLOW = 1, /* Data flows in one direction, e.g. recursive doubling */

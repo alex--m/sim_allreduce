@@ -1,14 +1,13 @@
-/*
- ============================================================================
- Name        : sim_coll.c
- Author      : Alex Margolin
- Version     : 1.0
- Description : Test Allreduce collective
- ============================================================================
- */
+#include "topology.h"
 
-#include "comm_graph.h"
-#include "sim_allreduce.h"
+#if defined(MPI_SPLIT_PROCS) || defined(MPI_SPLIT_TESTS)
+#include <mpi.h>
+#endif
+
+#define PERROR printf
+#define VERBOSE_PROC_THRESHOLD (0)
+#define MULTIPROCESS_ABSOLUTE_THRESHOLD (128)
+#define MULTIPROCESS_RELATIVE_THRESHOLD (1)
 
 #define _GNU_SOURCE
 #include <stdio.h>
@@ -52,6 +51,7 @@ typedef struct collective_spec
     /* Optimization of buffer reuse, when possible */
     unsigned last_proc_total_size;
     struct collective_iteration_ctx *ctx;
+    struct collective_exchange_optimization_ctx recv;
 } collective_spec_t;
 
 /*****************************************************************************\
@@ -64,10 +64,19 @@ typedef struct collective_spec
 #define MPI_Comm void*
 #define MPI_Datatype void*
 #define MPI_COMM_WORLD NULL
+#define MPI_BYTE NULL
+#define MPI_INT NULL
 
 int MPI_Init(int *argc, char ***argv)
 {
 	return OK;
+}
+
+int MPI_Alltoall(const void *sendbuf, int sendcount, MPI_Datatype sendtype,
+                 void *recvbuf, int recvcount, MPI_Datatype recvtype,
+                 MPI_Comm comm)
+{
+	return ERROR; /* Should never be called */
 }
 
 int MPI_Alltoallv(const void *sendbuf, const int *sendcounts,
@@ -75,7 +84,7 @@ int MPI_Alltoallv(const void *sendbuf, const int *sendcounts,
                   const int *recvcounts, const int *rdispls, MPI_Datatype recvtype,
                   MPI_Comm comm)
 {
-	return OK;
+	return ERROR; /* Should never be called */
 }
 
 int MPI_Finalize()
@@ -90,49 +99,86 @@ int MPI_Finalize()
  *                                                                           *
 \*****************************************************************************/
 
+enum split_mode {
+	NO_SPLIT = 0,
+	SPLIT_ITERATIONS, /* every node does a portion of the iterations */
+	SPLIT_PROCS, /* every node simulates a portion of procs in each iteration */
+};
+
 int sim_test_iteration_step(collective_spec_t *spec)
 {
-	void *sendbuf, *recvbuf = spec->optimize.recvbuf;
-	int *sendcounts, *recvcounts = spec->optimize.recvcounts;
-	int *sdispls, *rdispls = spec->optimize.rdispls;
-	int ret_val;
+	unsigned peer_count = spec->proc_group_count;
+	void *sendbuf, *recvbuf = spec->recv.recvbuf;
+	int *sendcounts, *recvcounts = spec->recv.recvcounts;
+	int *sdispls, *rdispls = spec->recv.rdispls;
+	int len, ret_val, i;
 
-	MPI_Datatype dtype = spec->optimize.mpi_dtype;
-
+	/* Run the next step of this iteration of the test, generate output */
 	ret_val = state_generate_next_step(&sendbuf, &sendcounts, &sdispls);
 	if (ret_val != OK) {
 		return ret_val;
 	}
 
-	ret_val = MPI_Alltoallv(sendbuf, sendcounts, sdispls, dtype,
-			                recvbuf, recvcounts, rdispls, dtype,
+	/* Determine the sum of output packets on all peers waiting to be sent */
+	ret_val = MPI_Alltoall(sendcounts, 1, MPI_INT,
+						   recvcounts, 1, MPI_INT, MPI_COMM_WORLD);
+	if (ret_val != OK) {
+		return ret_val;
+	}
+
+	/* Special case: localhost only */
+	if (peer_count == 1) {
+		return state_process_next_step(sendbuf, sendcounts, sdispls);
+	}
+
+	/* Calculate the displacements for the next MPI_Alltoallv() */
+	len = 0;
+	rdispls[0] = 0;
+	for (i = 0; i < peer_count; i++) {
+		int next_size = recvcounts[i];
+		rdispls[i + 1] = rdispls[i] + next_size;
+		len += next_size;
+	}
+
+	/* Ensure the incoming buffer is large enough for the exchange */
+	if (spec->recv.recvbuf_len < len) {
+		recvbuf = realloc(recvbuf, len);
+		if (!recvbuf) {
+			return ERROR;
+		}
+
+		spec->recv.recvbuf_len = len;
+		spec->recv.recvbuf = recvbuf;
+	}
+
+	/* Exchange information between peers */
+	ret_val = MPI_Alltoallv(sendbuf, sendcounts, sdispls, MPI_BYTE,
+			                recvbuf, recvcounts, rdispls, MPI_BYTE,
 				            MPI_COMM_WORLD);
 	if (ret_val != OK) {
 		return ret_val;
 	}
 
+	/* Use the incoming informatio to complete this step */
 	return state_process_next_step(recvbuf, recvcounts, rdispls);
 }
 
 int sim_test_iteration(collective_spec_t *spec)
 {
     int ret_val = OK;
+    state_t *old_state = spec->ctx;
 
-    if (spec->last_proc_total_size != spec->proc_total_size) {
-        if (spec->ctx != NULL) {
-            state_destroy(spec);
-        }
-
-        ret_val = state_create(spec, &spec->ctx);
-        if (ret_val != OK) {
-            return ret_val;
-        }
-
-        spec->last_proc_total_size = spec->proc_total_size;
+    /* Invalidate cached "old state" if the process count has changed */
+    if (old_state &&
+    	(spec->last_proc_total_size != spec->proc_total_size)) {
+        state_destroy(old_state);
     }
+    spec->last_proc_total_size = spec->proc_total_size;
 
-    if (sim_coll_ctx_reset(spec->ctx)) {
-        return ERROR;
+    /* Create a new state for this iteration of the test */
+    ret_val = state_create(spec, old_state, &spec->ctx);
+    if (ret_val != OK) {
+        return ret_val;
     }
 
     if (spec->step_count)
