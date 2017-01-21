@@ -1,3 +1,6 @@
+#include <stdio.h>
+#include "state.h"
+
 struct stats {
     unsigned long cnt;
     unsigned long sum;
@@ -42,7 +45,7 @@ void stats_aggregate(struct stats *stats, int is_root)
 }
 #endif
 
-void sim_coll_stats_print(struct stats *stats)
+void stats_print(struct stats *stats)
 {
     printf(",%lu,%lu,%.2f", stats->min, stats->max, stats->avg);
 }

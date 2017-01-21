@@ -29,8 +29,7 @@ comm_graph_t* comm_graph_create(node_id node_count,
 
 comm_graph_t* comm_graph_clone(comm_graph_t* original)
 {
-	comm_graph_node_t* node, *new_node;
-	comm_graph_direction_t *direction, *new_direction;
+	comm_graph_node_t *node, *new_node;
 	unsigned node_index, direction_index;
 
 	comm_graph_t *res = comm_graph_create(original->node_count,
@@ -43,9 +42,11 @@ comm_graph_t* comm_graph_clone(comm_graph_t* original)
 		 node_index < original->node_count;
 		 node_index++, new_node++, node++) {
 
-		for (direction_index = 0, direction = node->directions;
+		for (direction_index = 0;
 			 direction_index < node->direction_count;
-			 direction_index++, direction++) {
+			 direction_index++) {
+			comm_graph_direction_t *direction, *new_direction;
+			direction = node->directions[direction_index];
 
 			size_t direction_size = sizeof(*direction) + direction->arr_length * sizeof(node_id);
 			new_direction = malloc(direction_size);
@@ -66,16 +67,17 @@ comm_graph_t* comm_graph_clone(comm_graph_t* original)
 void comm_graph_destroy(comm_graph_t* comm_graph)
 {
 	comm_graph_node_t* node;
-	comm_graph_direction_t *direction;
 	unsigned node_index, direction_index;
 
 	for (node_index = 0, node = comm_graph->nodes;
 		 node_index < comm_graph->node_count;
 		 node_index++, node++) {
 
-		for (direction_index = 0, direction = node->directions;
+		for (direction_index = 0;
 			 direction_index < node->direction_count;
-			 direction_index++, direction++) {
+			 direction_index++) {
+			comm_graph_direction_t *direction =
+				node->directions[direction_index];
 
 			if (direction) {
 				free(direction);
@@ -94,4 +96,6 @@ int comm_graph_append(comm_graph_t* comm_graph, node_id father, node_id child)
 		node = &comm_graph->nodes[child];
 		COMM_GRAPH_DIRECTION_APPEND(node, 1, father);
 	}
+
+	return OK;
 }

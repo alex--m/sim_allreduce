@@ -1,14 +1,5 @@
-#include "topo_map.h"
-
 #include <assert.h>
-
-struct topology_iterator {
-	comm_graph_t *graph;
-	topology_spec_t *spec;
-	void *ctx; /* internal context for each iterator, type depends on topology */
-	topo_funcs_t funcs;
-	unsigned random_seed;
-};
+#include "topology.h"
 
 comm_graph_t *current_topology = NULL;
 unsigned current_reference_count = 0;
@@ -20,7 +11,7 @@ int topology_iterator_create(topology_spec_t *spec, topology_iterator_t *iterato
 	enum topology_map_slot map_slot;
 
 	/* Select and copy the function pointers for the requested topology */
-	switch (spec->topology) {
+	switch (spec->topology_type) {
 	case COLLECTIVE_TOPOLOGY_NARRAY_TREE:
 	case COLLECTIVE_TOPOLOGY_KNOMIAL_TREE:
 	case COLLECTIVE_TOPOLOGY_NARRAY_MULTIROOT_TREE:
@@ -58,28 +49,36 @@ int topology_iterator_create(topology_spec_t *spec, topology_iterator_t *iterato
 
 	iterator->spec = spec;
 	iterator->graph = current_topology;
-	iterator->random_seed = spec->random->random_seed;
+	iterator->random_seed = spec->topology.random.random_seed;
+	iterator->time_offset = (iterator->spec->model_type == COLLECTIVE_MODEL_TIME_OFFSET) ?
+			CYCLIC_RANDOM(iterator->spec, iterator->spec->model.time_offset_max) : 0;
 	return iterator->funcs.start_f(spec, current_topology, &iterator->ctx);
 }
 
 int topology_iterator_next(topology_iterator_t *iterator, node_id *target, unsigned *distance)
 {
-    if ((iterator->spec->model == COLLECTIVE_MODEL_PACKET_DROP) &&
-        (iterator->fail_rate > FLOAT_RANDOM(iterator))) {
-        *distance = NO_PACKET;
-        return OK;
-    }
+	switch (iterator->spec->model_type)
+	{
+	case COLLECTIVE_MODEL_PACKET_DELAY:
+        *distance = CYCLIC_RANDOM(iterator->spec, iterator->spec->model.packet_delay_max);
+        break;
 
-    if ((iterator->spec->model == COLLECTIVE_MODEL_TIME_OFFSET) &&
-        (iterator->step_index < ctx->time_offset[ctx->my_local_rank])) {
-        *distance = NO_PACKET;
-        return OK;
-    }
+	case COLLECTIVE_MODEL_PACKET_DROP:
+		if (iterator->spec->model.packet_drop_rate > FLOAT_RANDOM(iterator->spec)) {
+			*distance = NO_PACKET;
+			return OK;
+		}
+		break;
 
-    if (iterator->spec->model == COLLECTIVE_MODEL_PACKET_DELAY) {
-        distance = CYCLIC_RANDOM(iterator, iterator->delay_max);
-    } else {
-    	distance = 0;
+	case COLLECTIVE_MODEL_TIME_OFFSET:
+        if (--iterator->time_offset) {
+			*distance = NO_PACKET;
+			return OK;
+        }
+        break;
+
+	default:
+		*distance = 0;
     }
 
 	return iterator->funcs.next_f(iterator->graph, iterator->ctx, target, distance);

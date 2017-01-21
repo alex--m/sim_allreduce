@@ -1,20 +1,20 @@
-#include "topo_map.h"
+#include "topology.h"
 
-int tree_build(topology_spec_t spec, comm_graph_t **graph);
-int tree_start(topology_spec_t spec, comm_graph_t *graph, void **internal_ctx);
-int tree_next(void *internal_ctx, node_id *target, unsigned *distance);
+int tree_build(topology_spec_t *spec, comm_graph_t **graph);
+int tree_start(topology_spec_t *spec, comm_graph_t *graph, void **internal_ctx);
+int tree_next(comm_graph_t *graph, void *internal_ctx, node_id *target, unsigned *distance);
 int tree_fix();
 int tree_end(void *internal_ctx);
 
-int butterfly_build(topology_spec_t spec, comm_graph_t **graph);
-int butterfly_start(topology_spec_t spec, comm_graph_t *graph, void **internal_ctx);
-int butterfly_next(void *internal_ctx, node_id *target, unsigned *distance);
+int butterfly_build(topology_spec_t *spec, comm_graph_t **graph);
+int butterfly_start(topology_spec_t *spec, comm_graph_t *graph, void **internal_ctx);
+int butterfly_next(comm_graph_t *graph, void *internal_ctx, node_id *target, unsigned *distance);
 int butterfly_fix();
 int butterfly_end(void *internal_ctx);
 
-int random_build(topology_spec_t spec, comm_graph_t **graph);
-int random_start(topology_spec_t spec, comm_graph_t *graph, void **internal_ctx);
-int random_next(void *internal_ctx, node_id *target, unsigned *distance);
+int random_build(topology_spec_t *spec, comm_graph_t **graph);
+int random_start(topology_spec_t *spec, comm_graph_t *graph, void **internal_ctx);
+int random_next(comm_graph_t *graph, void *internal_ctx, node_id *target, unsigned *distance);
 int random_fix();
 int random_end(void *internal_ctx);
 

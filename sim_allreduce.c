@@ -1,4 +1,4 @@
-#include "topology.h"
+#include "state/state.h"
 
 #if defined(MPI_SPLIT_PROCS) || defined(MPI_SPLIT_TESTS)
 #include <mpi.h>
@@ -15,44 +15,18 @@
 #include <string.h>
 #include <getopt.h>
 
-typedef struct collective_spec
+typedef struct sim_spec
 {
-    collective_model_t model;
-    collective_topology_t topology;
+	state_t *state;
+	topology_spec_t topology;
+	optimization_t recv;
 
-    unsigned test_count;
-    unsigned step_index;
+	unsigned test_count; /* for statistical purposes */
     unsigned step_count; /* 0 to run until -1 is returned */
-    unsigned tree_radix;
-    unsigned cycle_const;
-    unsigned cycle_random;
-    unsigned random_seed;
-    unsigned delay_max;
-    unsigned offset_max;
-    unsigned failover;
-    float fail_rate;
 
-    unsigned proc_group_index;
-    unsigned proc_group_count;
-    unsigned proc_group_size;
-    unsigned proc_total_size;
-    unsigned bitfield_size;
-
-    unsigned test_node_index;
-    unsigned test_node_count;
-
-    unsigned long messages_counter;
-    unsigned long data_len_counter;
-
-    struct stats steps;
-    struct stats data;
-    struct stats msgs;
-
-    /* Optimization of buffer reuse, when possible */
-    unsigned last_proc_total_size;
-    struct collective_iteration_ctx *ctx;
-    struct collective_exchange_optimization_ctx recv;
-} collective_spec_t;
+	unsigned node_total_size;
+	unsigned last_node_total_size; /* OPTIMIZATION */
+} sim_spec_t;
 
 /*****************************************************************************\
  *                                                                           *
@@ -64,12 +38,23 @@ typedef struct collective_spec
 #define MPI_Comm void*
 #define MPI_Datatype void*
 #define MPI_COMM_WORLD NULL
+#define MPI_SUCCESS 0
 #define MPI_BYTE NULL
 #define MPI_INT NULL
 
 int MPI_Init(int *argc, char ***argv)
 {
 	return OK;
+}
+
+int MPI_Comm_rank(MPI_Comm comm, int* rank)
+{
+	return 0;
+}
+
+int MPI_Comm_size(MPI_Comm comm, int* rank)
+{
+	return 1;
 }
 
 int MPI_Alltoall(const void *sendbuf, int sendcount, MPI_Datatype sendtype,
@@ -105,33 +90,33 @@ enum split_mode {
 	SPLIT_PROCS, /* every node simulates a portion of procs in each iteration */
 };
 
-int sim_test_iteration_step(collective_spec_t *spec)
+int sim_test_iteration_step(sim_spec_t *spec)
 {
-	unsigned peer_count = spec->proc_group_count;
-	void *sendbuf, *recvbuf = spec->recv.recvbuf;
-	int *sendcounts, *recvcounts = spec->recv.recvcounts;
-	int *sdispls, *rdispls = spec->recv.rdispls;
+	unsigned peer_count = spec->node_group_count;
+	void *sendbuf, *recvbuf = spec->recv.buf;
+	int *sendcounts, *recvcounts = spec->recv.counts;
+	int *sdispls, *rdispls = spec->recv.displs;
 	int len, ret_val, i;
 
-	/* Run the next step of this iteration of the test, generate output */
-	ret_val = state_generate_next_step(&sendbuf, &sendcounts, &sdispls);
+	/* run the next step of this iteration of the test, generate output */
+	ret_val = state_generate_next_step(spec->state, &sendbuf, &sendcounts, &sdispls);
 	if (ret_val != OK) {
 		return ret_val;
 	}
 
-	/* Determine the sum of output packets on all peers waiting to be sent */
+	/* determine the sum of output packets on all peers waiting to be sent */
 	ret_val = MPI_Alltoall(sendcounts, 1, MPI_INT,
 						   recvcounts, 1, MPI_INT, MPI_COMM_WORLD);
 	if (ret_val != OK) {
 		return ret_val;
 	}
 
-	/* Special case: localhost only */
+	/* special case: localhost only */
 	if (peer_count == 1) {
 		return state_process_next_step(sendbuf, sendcounts, sdispls);
 	}
 
-	/* Calculate the displacements for the next MPI_Alltoallv() */
+	/* calculate the displacements for the next MPI_Alltoallv() */
 	len = 0;
 	rdispls[0] = 0;
 	for (i = 0; i < peer_count; i++) {
@@ -140,18 +125,18 @@ int sim_test_iteration_step(collective_spec_t *spec)
 		len += next_size;
 	}
 
-	/* Ensure the incoming buffer is large enough for the exchange */
-	if (spec->recv.recvbuf_len < len) {
+	/* ensure the incoming buffer is large enough for the exchange */
+	if (spec->recv.buf_len < len) {
 		recvbuf = realloc(recvbuf, len);
 		if (!recvbuf) {
 			return ERROR;
 		}
 
-		spec->recv.recvbuf_len = len;
-		spec->recv.recvbuf = recvbuf;
+		spec->recv.buf_len = len;
+		spec->recv.buf = recvbuf;
 	}
 
-	/* Exchange information between peers */
+	/* exchange information between peers */
 	ret_val = MPI_Alltoallv(sendbuf, sendcounts, sdispls, MPI_BYTE,
 			                recvbuf, recvcounts, rdispls, MPI_BYTE,
 				            MPI_COMM_WORLD);
@@ -159,35 +144,35 @@ int sim_test_iteration_step(collective_spec_t *spec)
 		return ret_val;
 	}
 
-	/* Use the incoming informatio to complete this step */
-	return state_process_next_step(recvbuf, recvcounts, rdispls);
+	/* Use the incoming information to complete this step */
+	return state_process_next_step(spec->state, recvbuf, len);
 }
 
-int sim_test_iteration(collective_spec_t *spec)
+int sim_test_iteration(sim_spec_t *spec)
 {
     int ret_val = OK;
-    state_t *old_state = spec->ctx;
+    state_t *old_state = spec->state;
 
-    /* Invalidate cached "old state" if the process count has changed */
-    if (old_state &&
-    	(spec->last_proc_total_size != spec->proc_total_size)) {
+    /* invalidate cached "old state" if the process count has changed */
+    if (old_state && (spec->last_node_total_size != spec->node_total_size)) {
         state_destroy(old_state);
     }
-    spec->last_proc_total_size = spec->proc_total_size;
+    spec->last_node_total_size = spec->node_total_size;
 
     /* Create a new state for this iteration of the test */
-    ret_val = state_create(spec, old_state, &spec->ctx);
+    ret_val = state_create(&spec->topology, old_state, &spec->state);
     if (ret_val != OK) {
         return ret_val;
     }
 
+    spec->topology.step_index = 0;
     if (spec->step_count)
     {
     	/* Run <step_count> steps */
-        while ((spec->step_index < spec->step_count) && (!ret_val))
+        while ((spec->topology.step_index < spec->step_count) && (!ret_val))
         {
-            ret_val = sim_coll_iteration_step(spec->ctx);
-            spec->step_index++;
+            ret_val = sim_test_iteration_step(spec->state);
+            spec->topology.step_index++;
         }
     }
     else
@@ -195,31 +180,33 @@ int sim_test_iteration(collective_spec_t *spec)
     	/* Run until everybody completes (unlimited) */
         while (ret_val == OK)
         {
-            ret_val = sim_coll_iteration_step(spec->ctx);
-            spec->step_index++;
+            ret_val = sim_test_iteration_step(spec->state);
+            spec->topology.step_index++;
         }
     }
 
     return (ret_val == ERROR) ? ERROR : OK;
 }
 
-int sim_test(collective_spec_t *spec)
+int sim_test(sim_spec_t *spec)
 {
     int ret_val = OK;
     unsigned test_count = spec->test_count;
     unsigned test_index = 0;
 
-#ifdef MPI_SPLIT_TESTS
+
+
+
+
+
+
     int is_root = (spec->test_node_index == 0);
     int aggregate = 1;
-#endif
 
-    if ((spec->topology < COLLECTIVE_TOPOLOGY_RANDOM_PURE) &&
-        (spec->model == COLLECTIVE_MODEL_ITERATIVE)) {
+    if ((spec->topology.topology_type < COLLECTIVE_TOPOLOGY_RANDOM_PURE) &&
+        (spec->topology.model_type == COLLECTIVE_MODEL_ITERATIVE)) {
             test_count = 1;
-#ifdef MPI_SPLIT_TESTS
             aggregate = 0;
-#endif
     }
 
 
@@ -244,13 +231,13 @@ int sim_test(collective_spec_t *spec)
         spec->messages_counter = 0;
         spec->data_len_counter = 0;
 
-        ret_val = sim_coll_once(spec);
+        ret_val = sim_test_iteration(spec);
 
         /* Correction for unused bits */
-        if (spec->proc_total_size & 7) {
+        if (spec->node_total_size & 7) {
             spec->data_len_counter -= spec->messages_counter *
-                (((CALC_BITFIELD_SIZE(spec->proc_total_size) - 1) << 3)
-                        - spec->proc_total_size);
+                (((CALC_BITFIELD_SIZE(spec->node_total_size) - 1) << 3)
+                        - spec->node_total_size);
         }
 
         sim_coll_stats_calc(&spec->steps, (unsigned long)spec->step_index);
@@ -279,10 +266,10 @@ int sim_test(collective_spec_t *spec)
 #ifdef MPI_SPLIT_TESTS
     if ((is_root) && (spec->test_node_index == 0)) {
 #else
-    if (spec->proc_group_index == 0) {
+    if (spec->node_group_index == 0) {
 #endif
         printf("%i,%i,%i,%i,%i,%i,%.1f,%i",
-               spec->proc_total_size, spec->model, spec->topology,
+               spec->node_total_size, spec->model, spec->topology,
                spec->tree_radix, spec->offset_max, spec->delay_max,
                spec->fail_rate, spec->test_count);
         sim_coll_stats_print(&spec->steps);
@@ -301,136 +288,129 @@ int sim_test(collective_spec_t *spec)
  *                                                                           *
 \*****************************************************************************/
 
-int sim_coll_tree_topology(collective_spec_t *spec)
+int sim_coll_tree_topology(sim_spec_t *spec)
 {
     int ret_val = OK;
     unsigned radix;
 
-    if (spec->tree_radix != 0) {
-        return sim_coll_run(spec);
+    if (spec->topology.topology.tree.radix != 0) {
+        return sim_test(spec);
     }
 
-    if (spec->topology == COLLECTIVE_TOPOLOGY_RECURSIVE_K_ING) {
-        spec->tree_radix = 2;
-        ret_val = sim_coll_run(spec);
-    } else {
-        for (radix = 2; ((radix < 10) && (ret_val != ERROR)); radix++) {
-            spec->tree_radix = radix;
-            switch (spec->topology) {
-            case COLLECTIVE_TOPOLOGY_RANDOM_FIXED_CONST: /* One const step for every <radix - 1> random steps */
-                spec->cycle_random = radix - 1;
-                spec->cycle_const = 1;
-                break;
+	for (radix = 2; ((radix < 10) && (ret_val != ERROR)); radix++) {
+		switch (spec->topology.topology_type) {
+		case COLLECTIVE_TOPOLOGY_RANDOM_FIXED_CONST: /* One const step for every <radix - 1> random steps */
+			spec->topology.topology.random.cycle_random = radix - 1;
+			spec->topology.topology.random.cycle_const = 1;
+			break;
 
-            case COLLECTIVE_TOPOLOGY_RANDOM_FIXED_RANDOM: /* One random step for every <radix> const steps */
-                spec->cycle_random = 1;
-                spec->cycle_const = radix;
-                break;
+		case COLLECTIVE_TOPOLOGY_RANDOM_FIXED_RANDOM: /* One random step for every <radix> const steps */
+			spec->topology.topology.random.cycle_random = 1;
+			spec->topology.topology.random.cycle_const = radix;
+			break;
 
-            case COLLECTIVE_TOPOLOGY_RANDOM_VARIABLE_LINEAR: /* After every <radix> random steps - add one const step to the cycle */
-            case COLLECTIVE_TOPOLOGY_RANDOM_VARIABLE_EXPONENTIAL: /* After every <radix> random steps - double the non-random steps in the cycle */
-                spec->cycle_random = radix;
-                spec->cycle_const = 0;
-                break;
+		case COLLECTIVE_TOPOLOGY_RANDOM_VARIABLE_LINEAR: /* After every <radix> random steps - add one const step to the cycle */
+		case COLLECTIVE_TOPOLOGY_RANDOM_VARIABLE_EXPONENTIAL: /* After every <radix> random steps - double the non-random steps in the cycle */
+			spec->topology.topology.random.cycle_random = radix;
+			spec->topology.topology.random.cycle_const = 0;
+			break;
 
-            default:
-                spec->cycle_random = 0;
-                spec->cycle_const = 0;
-                break;
-            }
-            ret_val = sim_coll_run(spec);
-        }
-    }
+		default:
+			spec->topology.topology.tree.radix = 0;
+			break;
+		}
+		ret_val = sim_test(spec);
+	}
 
-    spec->tree_radix = 0;
+    spec->topology.topology.tree.radix = 0;
     return ret_val;
 }
 
-int sim_coll_topology(collective_spec_t *spec)
+int sim_coll_topology(sim_spec_t *spec)
 {
     int ret_val = OK;
-    collective_topology_t index;
+    topology_type_t index;
 
-    if (spec->topology < COLLECTIVE_TOPOLOGY_ALL) {
-        return (spec->topology != COLLECTIVE_TOPOLOGY_RANDOM_PURE) ?
-                sim_coll_tree_topology(spec) : sim_coll_run(spec);
+    if (spec->topology.topology_type < COLLECTIVE_TOPOLOGY_ALL) {
+        return (spec->topology.topology_type != COLLECTIVE_TOPOLOGY_RANDOM_PURE) ?
+                sim_coll_tree_topology(spec) : sim_test(spec);
     }
 
     for (index = 0;
          ((index < COLLECTIVE_TOPOLOGY_ALL) && (ret_val != ERROR));
          index++) {
-        spec->topology = index;
-        ret_val = (spec->topology != COLLECTIVE_TOPOLOGY_RANDOM_PURE) ?
-                sim_coll_tree_topology(spec) : sim_coll_run(spec);
+        spec->topology.topology_type = index;
+        ret_val = (spec->topology.topology_type != COLLECTIVE_TOPOLOGY_RANDOM_PURE) ?
+                sim_coll_tree_topology(spec) : sim_test(spec);
     }
 
-    spec->topology = COLLECTIVE_TOPOLOGY_ALL;
+    spec->topology.topology_type = COLLECTIVE_TOPOLOGY_ALL;
     return ret_val;
 }
 
-int sim_coll_model_packet_delay(collective_spec_t *spec)
+int sim_coll_model_packet_delay(sim_spec_t *spec)
 {
     int ret_val = OK;
     unsigned index, base2;
 
-    if (spec->delay_max != 0) {
+    if (spec->topology.model.packet_delay_max != 0) {
         return sim_coll_topology(spec);
     }
 
     /* Calculate the upper limit as closest power of 2 to the square root */
-    for (base2 = 1; base2 * base2 < spec->proc_total_size; base2 = base2 * 2);
+    for (base2 = 1; base2 * base2 < spec->node_total_size; base2 = base2 * 2);
 
     for (index = 1; ((index <= base2) && (ret_val != ERROR)); index <<= 1) {
-        spec->delay_max = index;
+    	spec->topology.model.packet_delay_max = index;
         ret_val = sim_coll_topology(spec);
     }
 
-    spec->delay_max = 0;
+    spec->topology.model.packet_delay_max = 0;
     return ret_val;
 }
 
-int sim_coll_model_packet_drop(collective_spec_t *spec)
+int sim_coll_model_packet_drop(sim_spec_t *spec)
 {
     int ret_val = OK;
     float index;
 
-    if (spec->fail_rate != 0) {
+    if (spec->topology.model.packet_drop_rate != 0) {
         return sim_coll_topology(spec);
     }
 
     for (index = 0.1; ((index < 0.6) && (ret_val != ERROR)); index += 0.2) {
-        spec->fail_rate = index;
+    	spec->topology.model.packet_drop_rate = index;
         ret_val = sim_coll_topology(spec);
     }
 
-    spec->fail_rate = 0;
+    spec->topology.model.packet_drop_rate = 0;
     return ret_val;
 }
 
-int sim_coll_model_time_offset(collective_spec_t *spec)
+int sim_coll_model_time_offset(sim_spec_t *spec)
 {
     int ret_val = OK;
     unsigned index, base2;
 
-    if (spec->offset_max != 0) {
+    if (spec->topology.model.time_offset_max != 0) {
         return sim_coll_topology(spec);
     }
 
     /* Calculate the upper limit as closest power of 2 to the square root */
-    for (base2 = 1; base2 * base2 < spec->proc_total_size; base2 = base2 * 2);
+    for (base2 = 1; base2 * base2 < spec->node_total_size; base2 = base2 * 2);
 
     for (index = 1; ((index <= base2) && (ret_val != ERROR)); index <<= 1) {
-        spec->offset_max = index;
+    	spec->topology.model.time_offset_max = index;
         ret_val = sim_coll_topology(spec);
     }
 
-    spec->offset_max = 0;
+    spec->topology.model.time_offset_max = 0;
     return ret_val;
 }
 
-int sim_coll_model_vars(collective_spec_t *spec)
+int sim_coll_model_vars(sim_spec_t *spec)
 {
-    switch (spec->model) {
+    switch (spec->topology.model_type) {
     case COLLECTIVE_MODEL_ITERATIVE:
         return sim_coll_topology(spec);
 
@@ -449,23 +429,23 @@ int sim_coll_model_vars(collective_spec_t *spec)
     }
 }
 
-int sim_coll_model(collective_spec_t *spec)
+int sim_coll_model(sim_spec_t *spec)
 {
     int ret_val = OK;
-    collective_model_t index;
+    model_type_t index;
 
-    if (spec->model < COLLECTIVE_MODEL_ALL) {
+    if (spec->topology.model_type < COLLECTIVE_MODEL_ALL) {
         return sim_coll_model_vars(spec);
     }
 
     for (index = 0;
          ((index < COLLECTIVE_MODEL_ALL) && (ret_val != ERROR));
          index++) {
-        spec->model = index;
+    	spec->topology.model_type = index;
         ret_val = sim_coll_model_vars(spec);
     }
 
-    spec->model = COLLECTIVE_MODEL_ALL;
+    spec->topology.model_type = COLLECTIVE_MODEL_ALL;
     return ret_val;
 }
 
@@ -504,7 +484,7 @@ const char HELP_STRING[] =
         "model (default: iterate from 0 to procs in powers of 2)\n\n"
         "";
 
-int sim_coll_parse_args(int argc, char **argv, collective_spec_t *spec)
+int sim_coll_parse_args(int argc, char **argv, sim_spec_t *spec)
 {
     int c;
 
@@ -536,43 +516,44 @@ int sim_coll_parse_args(int argc, char **argv, collective_spec_t *spec)
             break;
 
         case 'm':
-            spec->model = atoi(optarg);
-            if (spec->model > COLLECTIVE_MODEL_ALL) {
+            spec->topology.model_type = atoi(optarg);
+            if (spec->topology.model_type > COLLECTIVE_MODEL_ALL) {
                 printf("Invalid argument for -m: %s\n%s", optarg, HELP_STRING);
                 return ERROR;
             }
             break;
 
         case 't':
-            spec->topology = atoi(optarg);
-            if (spec->topology > COLLECTIVE_TOPOLOGY_ALL) {
+            spec->topology.topology_type = atoi(optarg);
+            if (spec->topology.topology_type > COLLECTIVE_TOPOLOGY_ALL) {
                 printf("Invalid argument for -t: %s\n%s", optarg, HELP_STRING);
                 return ERROR;
             }
             break;
 
         case 'p':
-            spec->proc_total_size = atoi(optarg);
+            spec->node_total_size = atoi(optarg);
             break;
 
         case 'r':
-            spec->tree_radix = atoi(optarg);
+            spec->topology.topology.tree.radix = atoi(optarg);
             break;
 
         case 'f':
-            spec->fail_rate = atof(optarg);
-            if ((spec->fail_rate <= 0.0) || (spec->fail_rate >= 1.0)) {
+            spec->topology.model.packet_drop_rate = atof(optarg);
+            if ((spec->topology.model.packet_drop_rate <= 0.0) ||
+            	(spec->topology.model.packet_drop_rate >= 1.0)) {
                 printf("Invalid argument for -f: %s\n%s", optarg, HELP_STRING);
                 return ERROR;
             }
             break;
 
         case 'd':
-            spec->delay_max = atoi(optarg);
+        	spec->topology.model.packet_delay_max = atoi(optarg);
             break;
 
         case 'o':
-            spec->offset_max = atoi(optarg);
+        	spec->topology.model.time_offset_max = atoi(optarg);
             break;
 
         case 'i':
@@ -596,21 +577,21 @@ int sim_coll_parse_args(int argc, char **argv, collective_spec_t *spec)
         return ERROR;
     }
 
-    spec->proc_group_size = spec->proc_total_size /
-            spec->proc_group_count;
+    spec->node_group_size = spec->node_total_size /
+            spec->node_group_count;
     return OK;
 }
 
-int sim_calc_procs(collective_spec_t *spec)
+int sim_calc_procs(sim_spec_t *spec)
 {
     int ret_val = OK;
-    collective_model_t index;
-    unsigned orig_count = spec->proc_group_count;
+    int index;
+    unsigned orig_count = spec->node_group_count;
 
-    if (spec->proc_total_size != 0) {
-        spec->proc_group_size = spec->proc_total_size / spec->proc_group_count;
-        spec->proc_total_size = spec->proc_group_size * spec->proc_group_count;
-        spec->bitfield_size = CALC_BITFIELD_SIZE(spec->proc_total_size);
+    if (spec->node_total_size != 0) {
+        spec->node_group_size = spec->node_total_size / spec->node_group_count;
+        spec->node_total_size = spec->node_group_size * spec->node_group_count;
+        spec->bitfield_size = CALC_BITFIELD_SIZE(spec->node_total_size);
         return sim_coll_model(spec);
     }
 
@@ -620,19 +601,19 @@ int sim_calc_procs(collective_spec_t *spec)
 
         if ((index < MULTIPROCESS_ABSOLUTE_THRESHOLD) ||
             (index < MULTIPROCESS_RELATIVE_THRESHOLD * orig_count)) {
-            if (spec->proc_group_index != 0) {
+            if (spec->node_group_index != 0) {
                 continue;
             }
 
-            spec->proc_group_count = 1;
-            spec->proc_group_size = index;
-            spec->proc_total_size = index;
+            spec->node_group_count = 1;
+            spec->node_group_size = index;
+            spec->node_total_size = index;
         } else {
-            spec->proc_group_count = orig_count;
-            spec->proc_group_size = index / orig_count;
-            spec->proc_total_size = spec->proc_group_size * orig_count;
+            spec->node_group_count = orig_count;
+            spec->node_group_size = index / orig_count;
+            spec->node_total_size = spec->node_group_size * orig_count;
         }
-        spec->bitfield_size = CALC_BITFIELD_SIZE(spec->proc_total_size);
+        spec->bitfield_size = CALC_BITFIELD_SIZE(spec->node_total_size);
 
         ret_val = sim_coll_model(spec);
     }
@@ -646,21 +627,10 @@ int main(int argc, char **argv)
     int ret_val;
 
     /* Set the defaults */
-    collective_spec_t spec = {
-        .model = COLLECTIVE_MODEL_ALL,
-        .topology = COLLECTIVE_TOPOLOGY_ALL,
-        .tree_radix = 0,
-        .test_count = 1,
-        .random_seed = 1,
-        .proc_group_index = 0,
-        .proc_group_count = 1,
-        .proc_total_size = 0,
-        .delay_max = 0,
-        .offset_max = 0,
-        .fail_rate = 0.0,
-        .last_proc_total_size = 0,
-        .ctx = 0
-    };
+    sim_spec_t spec = {0};
+    spec.topology.model_type = COLLECTIVE_MODEL_ALL;
+    spec.topology.topology_type = COLLECTIVE_TOPOLOGY_ALL;
+    spec.test_count = 1;
 
     if (sim_coll_parse_args(argc, argv, &spec))
     {
@@ -675,53 +645,42 @@ int main(int argc, char **argv)
     }
 #endif
 
-#if defined(MPI_SPLIT_PROCS) || defined(MPI_SPLIT_TESTS)
     MPI_Init(&argc,&argv);
-#endif
 
-#if defined(MPI_SPLIT_TESTS)
-    ret_val = MPI_Comm_rank(MPI_COMM_WORLD, (int*)&spec.test_node_index);
+    ret_val = MPI_Comm_rank(MPI_COMM_WORLD, (int*)&spec.topology.node_group_index);
     if (ret_val != MPI_SUCCESS) {
         goto finalize;
     }
 
-    ret_val = MPI_Comm_size(MPI_COMM_WORLD, (int*)&spec.test_node_count);
+    ret_val = MPI_Comm_size(MPI_COMM_WORLD, (int*)&spec.node_group_count);
     if (ret_val != MPI_SUCCESS) {
         goto finalize;
     }
 
     spec.random_seed += spec.test_node_index;
-#endif
-
-#if defined(MPI_SPLIT_PROCS)
-    ret_val = MPI_Comm_rank(MPI_COMM_WORLD, (int*)&spec.proc_group_index);
+    ret_val = MPI_Comm_rank(MPI_COMM_WORLD, (int*)&spec.node_group_index);
     if (ret_val != MPI_SUCCESS) {
         goto finalize;
     }
 
-    ret_val = MPI_Comm_size(MPI_COMM_WORLD, (int*)&spec.proc_group_count);
+    ret_val = MPI_Comm_size(MPI_COMM_WORLD, (int*)&spec.node_group_count);
     if (ret_val != MPI_SUCCESS) {
         goto finalize;
     }
 
     /* For reproducability - use only highest-power-of-2 first processes */
-    if (__builtin_popcount(spec.proc_group_count) != 1) {
-        if (spec.proc_group_index == 0) {
+    if (__builtin_popcount(spec.node_group_count) != 1) {
+        if (spec.node_group_index == 0) {
             PERROR("Process count (%i) is not a power of 2.",
-                   spec.proc_group_count);
+                   spec.node_group_count);
         }
         goto finalize;
     }
 
-    spec.random_seed += spec.proc_group_index;
-#endif
+    spec.random_seed += spec.node_group_index;
 
-#ifdef MPI_SPLIT_TESTS
-    if ((spec.proc_group_index == 0) &&
+    if ((spec.node_group_index == 0) &&
         (spec.test_node_index == 0)) {
-#else
-    if (spec.proc_group_index == 0) {
-#endif
         printf("Execution specification:\n"
                 "model=%i "
                 "topology=%i "
@@ -729,12 +688,12 @@ int main(int argc, char **argv)
                 "test_count=%i "
                 "tree_radix=%i "
                 "random_seed=%i "
-                "proc_group_index=%i "
-                "proc_group_count=%i "
-                "proc_group_size=%i\n",
+                "node_group_index=%i "
+                "node_group_count=%i "
+                "node_group_size=%i\n",
                 spec.model, spec.topology, spec.step_count, spec.test_count,
-                spec.tree_radix, spec.random_seed, spec.proc_group_index,
-                spec.proc_group_count, spec.proc_group_size);
+                spec.tree_radix, spec.random_seed, spec.node_group_index,
+                spec.node_group_count, spec.node_group_size);
 
         /* CSV header */
         printf("np,model,topo,radix,max_offset,max_delay,"
@@ -744,12 +703,8 @@ int main(int argc, char **argv)
 
     ret_val = sim_coll_procs(&spec);
 
-#ifdef MPI_SPLIT_TESTS
-    if ((spec.proc_group_index == 0) &&
+    if ((spec.node_group_index == 0) &&
         (spec.test_node_index == 0)) {
-#else
-    if (spec.proc_group_index == 0) {
-#endif
         if (ret_val == ERROR) {
             printf("Failure stopped the run!\n");
         } else {
@@ -761,10 +716,8 @@ int main(int argc, char **argv)
         sim_coll_ctx_free(&spec);
     }
 
-#if defined(MPI_SPLIT_PROCS) || defined(MPI_SPLIT_TESTS)
 finalize:
     MPI_Finalize();
-#endif
 
     return ret_val;
 }

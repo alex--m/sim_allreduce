@@ -74,11 +74,11 @@ static comm_graph_t* build_tree(unsigned node_count,
 	return tree;
 }
 
-int tree_build(topology_spec_t spec, comm_graph_t **graph)
+int tree_build(topology_spec_t *spec, comm_graph_t **graph)
 {
 	enum comm_graph_direction_count direction_count;
 
-	switch (spec->topology) {
+	switch (spec->topology_type) {
 	case COLLECTIVE_TOPOLOGY_NARRAY_TREE:
 		direction_count = COMM_GRAPH_BIDI;
 		break;
@@ -94,6 +94,9 @@ int tree_build(topology_spec_t spec, comm_graph_t **graph)
 	case COLLECTIVE_TOPOLOGY_KNOMIAL_MULTIROOT_TREE:
 		direction_count = COMM_GRAPH_BIDI;
 		break;
+
+	default:
+		return ERROR;
 	}
 
 	*graph = comm_graph_create(spec->node_count, direction_count);
@@ -105,4 +108,5 @@ int fix_tree(comm_graph_t* tree, node_id bad_node) {
  * On the way up, if a node is broken: send to his father, then try his peers one after the other, then the grandfather, then the father's peers....
  * On the way down - send to his sons...
  */
+	return ERROR;
 }

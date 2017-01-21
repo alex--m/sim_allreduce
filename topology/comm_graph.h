@@ -34,6 +34,8 @@ typedef struct comm_graph {
 comm_graph_t* comm_graph_create(unsigned long node_count,
 		enum comm_graph_direction_count direction_count);
 
+comm_graph_t* comm_graph_clone(comm_graph_t* original);
+
 void comm_graph_destroy(comm_graph_t* comm_graph);
 
 int comm_graph_append(comm_graph_t* comm_graph, node_id father, node_id child);

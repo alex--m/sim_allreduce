@@ -1,8 +1,8 @@
 #include "comm_graph.h"
 
 #ifdef __linux__
-#define CYCLIC_RANDOM(spec, mod) (rand_r(&(spec)->random_seed) % (mod))
-#define FLOAT_RANDOM(spec) ((rand_r(&(spec)->random_seed)) / ((float)RAND_MAX))
+#define CYCLIC_RANDOM(spec, mod) (rand_r(&(spec)->topology.random.random_seed) % (mod))
+#define FLOAT_RANDOM(spec) ((rand_r(&(spec)->topology.random.random_seed)) / ((float)RAND_MAX))
 #elif _WIN32
 #define CYCLIC_RANDOM(spec, mod) (rand() % (mod))
 #define FLOAT_RANDOM(spec) (((float)rand()) / RAND_MAX)
@@ -39,28 +39,66 @@ typedef enum model_type
 
 typedef struct topology_spec
 {
-	topology_type_t topology;
-	model_type_t model;
-	node_id node_count;
 	node_id my_rank;
+	node_id node_count;
+	node_id local_node_count;
+
+    group_id node_group_index;
+    group_id node_group_count;
+
+	unsigned step_index; /* struct abuse in favor of optimization */
+
+	topology_type_t topology_type;
 	union {
 		struct {
-
+		    unsigned radix;
 		} tree;
 		struct {
-
+		    unsigned radix;
 		} butterfly;
 		struct {
 			unsigned cycle_random;
 			unsigned cycle_const;
 			unsigned random_seed;
 		} random;
-	};
+	} topology;
+
+	model_type_t model_type;
+	union {
+		float packet_drop_rate;
+		unsigned time_offset_max;
+		unsigned packet_delay_max;
+	} model;
 } topology_spec_t;
 
-typedef struct topology_iterator topology_iterator_t;
+enum topology_map_slot
+{
+	TREE,
+	BUTTERFLY,
+	RANDOM
+};
+
+typedef struct topo_funcs
+{
+	int (*build_f)(topology_spec_t *spec, comm_graph_t **graph);
+	int (*start_f)(topology_spec_t *spec, comm_graph_t *graph, void **internal_ctx);
+	int (*next_f)(comm_graph_t *graph, void *internal_ctx, node_id *target, unsigned *distance);
+	int (*fix_f)();
+	int (*end_f)(void *internal_ctx);
+} topo_funcs_t;
+
+typedef struct topology_iterator {
+	comm_graph_t *graph;
+	topology_spec_t *spec;
+	void *ctx; /* internal context for each iterator, type depends on topology */
+	topo_funcs_t funcs;
+	unsigned time_offset;
+	unsigned random_seed;
+} topology_iterator_t;
 
 int topology_iterator_create(topology_spec_t *spec, topology_iterator_t *iterator);
+
+#define NO_PACKET ((unsigned)-1) /* set as distance */
 
 int topology_iterator_next(topology_iterator_t *iterator, node_id *target, unsigned *distance);
 
