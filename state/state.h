@@ -1,7 +1,20 @@
 #include "../topology/topology.h"
 
 typedef struct state state_t;
-typedef struct stats stats_t;
+
+typedef struct stats {
+    unsigned long cnt;
+    unsigned long sum;
+    unsigned long min;
+    unsigned long max;
+    float avg;
+} stats_t;
+
+typedef struct raw_stats {
+	unsigned long step_counter;
+	unsigned long messages_counter;
+	unsigned long data_len_counter;
+} raw_stats_t;
 
 typedef struct exchange_optimization
 {
@@ -25,6 +38,9 @@ int state_generate_next_step(state_t *state, void **sendbuf, int **sendcounts, i
 
 /* process a list of packets recieved from other peers (from MPI_Alltoallv) */
 int state_process_next_step(state_t *state, const char *incoming, unsigned length);
+
+/* Collect stats */
+int state_get_raw_stats(state_t *state, raw_stats_t *stats);
 
 /* Destroy state and sum up stats */
 void state_destroy(state_t *state);

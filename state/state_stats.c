@@ -1,13 +1,6 @@
+#include <mpi.h>
 #include <stdio.h>
 #include "state.h"
-
-struct stats {
-    unsigned long cnt;
-    unsigned long sum;
-    unsigned long min;
-    unsigned long max;
-    float avg;
-};
 
 void stats_init(struct stats *stats)
 {
@@ -28,7 +21,6 @@ void stats_calc(struct stats *stats, unsigned long value)
     }
 }
 
-#ifdef MPI_SPLIT_TESTS
 void stats_aggregate(struct stats *stats, int is_root)
 {
     if (is_root) {
@@ -43,7 +35,6 @@ void stats_aggregate(struct stats *stats, int is_root)
         MPI_Reduce(&stats->max, 0, 1, MPI_UNSIGNED_LONG, MPI_MAX, 0, MPI_COMM_WORLD);
     }
 }
-#endif
 
 void stats_print(struct stats *stats)
 {

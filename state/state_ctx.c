@@ -34,11 +34,8 @@ typedef struct state
     unsigned char *delayed_data;/* Bit-fields to be sent with a delay */
     optimization_t send;        /* Recycled buffers for sending */
 
-
 	int verbose;
-//    stats_t steps;
-//    stats_t data;
-//    stats_t msgs;
+	raw_stats_t stats;
 } state_t;
 
 int state_create(topology_spec_t *spec, state_t *old_state, state_t **new_state)
@@ -50,6 +47,7 @@ int state_create(topology_spec_t *spec, state_t *old_state, state_t **new_state)
     	ctx = old_state;
     	memset(ctx->new_matrix, 0, CTX_MATRIX_SIZE(ctx));
     	memset(ctx->old_matrix, 0, CTX_MATRIX_SIZE(ctx));
+    	memset(ctx->stats, 0, sizeof(ctx->stats));
     } else {
     	ctx = calloc(1, sizeof(*ctx));
 		if (ctx == NULL) {
@@ -195,6 +193,10 @@ int state_generate_next_step(state_t *state, void **sendbuf, int **sendcounts, i
 		}
 
 		if (distance != NO_PACKET) {
+			/* Update the statistics */
+			state->stats.messages_counter++;
+			// TODO: state->stats.data_len_counter += MY_POPCOUNT(state);
+
 			/* Determine which group contains this destination rank */
 			destiantion_group = destination / state->local_node_count;
 			destination_local_rank = destination % state->local_node_count;
@@ -275,6 +277,11 @@ int state_process_next_step(state_t *state, const char *incoming, unsigned lengt
 	}
 
     return IS_ALL_FULL(state);
+}
+
+int state_get_raw_stats(state_t *state, raw_stats_t *stats) {
+	memcpy(stats, state->stats, sizeof(*stats));
+	return OK;
 }
 
 /* Destroy state state_t*/

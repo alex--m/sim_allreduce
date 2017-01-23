@@ -43,9 +43,6 @@ typedef struct topology_spec
 	node_id node_count;
 	node_id local_node_count;
 
-    group_id node_group_index;
-    group_id node_group_count;
-
 	unsigned step_index; /* struct abuse in favor of optimization */
 
 	topology_type_t topology_type;

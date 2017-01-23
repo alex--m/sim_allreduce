@@ -1,13 +1,9 @@
 #include "state/state.h"
-
-#if defined(MPI_SPLIT_PROCS) || defined(MPI_SPLIT_TESTS)
 #include <mpi.h>
-#endif
 
 #define PERROR printf
-#define VERBOSE_PROC_THRESHOLD (0)
-#define MULTIPROCESS_ABSOLUTE_THRESHOLD (128)
-#define MULTIPROCESS_RELATIVE_THRESHOLD (1)
+
+#define PROCESS_NODE_CAPACITY (4096)
 
 #define _GNU_SOURCE
 #include <stdio.h>
@@ -21,62 +17,17 @@ typedef struct sim_spec
 	topology_spec_t topology;
 	optimization_t recv;
 
-	unsigned test_count; /* for statistical purposes */
-    unsigned step_count; /* 0 to run until -1 is returned */
+    group_id node_group_index; /* Index of this node group */
+    group_id node_group_count; /* Total number of groups */
+	unsigned node_total_count; /* Total number of nodes */
 
-	unsigned node_total_size;
-	unsigned last_node_total_size; /* OPTIMIZATION */
+	unsigned test_count;       /* for statistical purposes */
+    unsigned step_count;       /* 0 to run until -1 is returned */
+
+	stats_t steps;
+	stats_t data;
+	stats_t msgs;
 } sim_spec_t;
-
-/*****************************************************************************\
- *                                                                           *
- *                              MPI Mockup                                   *
- *                                                                           *
-\*****************************************************************************/
-
-#ifndef MPI
-#define MPI_Comm void*
-#define MPI_Datatype void*
-#define MPI_COMM_WORLD NULL
-#define MPI_SUCCESS 0
-#define MPI_BYTE NULL
-#define MPI_INT NULL
-
-int MPI_Init(int *argc, char ***argv)
-{
-	return OK;
-}
-
-int MPI_Comm_rank(MPI_Comm comm, int* rank)
-{
-	return 0;
-}
-
-int MPI_Comm_size(MPI_Comm comm, int* rank)
-{
-	return 1;
-}
-
-int MPI_Alltoall(const void *sendbuf, int sendcount, MPI_Datatype sendtype,
-                 void *recvbuf, int recvcount, MPI_Datatype recvtype,
-                 MPI_Comm comm)
-{
-	return ERROR; /* Should never be called */
-}
-
-int MPI_Alltoallv(const void *sendbuf, const int *sendcounts,
-                  const int *sdispls, MPI_Datatype sendtype, void *recvbuf,
-                  const int *recvcounts, const int *rdispls, MPI_Datatype recvtype,
-                  MPI_Comm comm)
-{
-	return ERROR; /* Should never be called */
-}
-
-int MPI_Finalize()
-{
-	return OK;
-}
-#endif
 
 /*****************************************************************************\
  *                                                                           *
@@ -92,7 +43,7 @@ enum split_mode {
 
 int sim_test_iteration_step(sim_spec_t *spec)
 {
-	unsigned peer_count = spec->node_group_count;
+	unsigned peer_count = spec->topology.node_group_count;
 	void *sendbuf, *recvbuf = spec->recv.buf;
 	int *sendcounts, *recvcounts = spec->recv.counts;
 	int *sdispls, *rdispls = spec->recv.displs;
@@ -148,7 +99,7 @@ int sim_test_iteration_step(sim_spec_t *spec)
 	return state_process_next_step(spec->state, recvbuf, len);
 }
 
-int sim_test_iteration(sim_spec_t *spec)
+int sim_test_iteration(sim_spec_t *spec, raw_stats_t *stats)
 {
     int ret_val = OK;
     state_t *old_state = spec->state;
@@ -185,73 +136,76 @@ int sim_test_iteration(sim_spec_t *spec)
         }
     }
 
-    return (ret_val == ERROR) ? ERROR : OK;
+
+    if (ret_val == ERROR) {
+    	return ERROR;
+    }
+
+    ret_val = state_get_raw_stats(stats);
+    stats->step_counter = (unsigned long)spec->topology.step_index;
+    return ret_val;
 }
 
 int sim_test(sim_spec_t *spec)
 {
     int ret_val = OK;
-    unsigned test_count = spec->test_count;
-    unsigned test_index = 0;
-
-
-
-
-
-
-
-    int is_root = (spec->test_node_index == 0);
+    raw_stats_t raw;
     int aggregate = 1;
+    unsigned test_index = 0;
+    unsigned test_count = spec->test_count;
+    unsigned node_counter = spec->node_total_count;
+    unsigned group_counter = node_counter / PROCESS_NODE_CAPACITY;
+    int is_root = spec->node_group_index == 0;
 
+    /* sanity check */
+    if ((group_counter) && (node_counter % PROCESS_NODE_CAPACITY)) {
+    	return ERRROR;
+    }
+
+    /* no need to collect statistics on deterministic algorithms */
     if ((spec->topology.topology_type < COLLECTIVE_TOPOLOGY_RANDOM_PURE) &&
         (spec->topology.model_type == COLLECTIVE_MODEL_ITERATIVE)) {
             test_count = 1;
             aggregate = 0;
     }
 
-
-#ifdef MPI_SPLIT_TESTS
-    if (is_root) {
-        test_count = test_count / spec->test_node_count +
-                test_count % spec->test_node_count;
-        if (test_count == spec->test_count) {
-            aggregate = 0;
-        }
-    } else {
-        test_count = test_count / spec->test_node_count;
-        if (test_count == 0) {
-            aggregate = 0;
-        }
+    /* unused processes (for this test) should not proceed */
+    if ((spec->node_group_index > group_counter) && (test_count == 1)) {
+    	return OK;
     }
-#endif
+
+    if (group_counter) {
+    	/* Distribute nodes among processes */
+    	if ()
+    } else {
+        /* Distribute tests among processes */
+		if (spec->node_group_index) {
+			test_count /= spec->node_group_count;
+		} else {
+			test_count = (test_count / spec->node_group_count)
+					+ (test_count % spec->node_group_count);
+		}
+    }
 
     while ((test_index < test_count) && (ret_val != ERROR))
     {
-        spec->step_index = 0;
-        spec->messages_counter = 0;
-        spec->data_len_counter = 0;
 
-        ret_val = sim_test_iteration(spec);
+    	/* Run the a single iteration (independent) of the test */
+        ret_val = sim_test_iteration(spec, &raw);
 
-        /* Correction for unused bits */
-        if (spec->node_total_size & 7) {
-            spec->data_len_counter -= spec->messages_counter *
-                (((CALC_BITFIELD_SIZE(spec->node_total_size) - 1) << 3)
-                        - spec->node_total_size);
-        }
-
-        sim_coll_stats_calc(&spec->steps, (unsigned long)spec->step_index);
-        sim_coll_stats_calc(&spec->msgs, spec->messages_counter);
-        sim_coll_stats_calc(&spec->data, spec->data_len_counter);
+        /* Collect statistics */
+        stats_calc(&spec->steps, raw.step_counter);
+        stats_calc(&spec->msgs, raw.messages_counter);
+        stats_calc(&spec->data, raw.data_len_counter);
 
         test_index++;
     }
 
-#ifdef MPI_SPLIT_TESTS
+    /* If multiple tests were done on multiple processes - aggregate */
     if (aggregate) {
         sim_coll_stats_aggregate(&spec->steps, is_root);
     }
-#endif
+
     spec->steps.avg = (float)spec->steps.sum / spec->steps.cnt;
 
 #if defined(MPI_SPLIT_PROCS) || defined(MPI_SPLIT_TESTS)
@@ -358,7 +312,7 @@ int sim_coll_model_packet_delay(sim_spec_t *spec)
     }
 
     /* Calculate the upper limit as closest power of 2 to the square root */
-    for (base2 = 1; base2 * base2 < spec->node_total_size; base2 = base2 * 2);
+    for (base2 = 1; base2 * base2 < spec->node_total_count; base2 = base2 * 2);
 
     for (index = 1; ((index <= base2) && (ret_val != ERROR)); index <<= 1) {
     	spec->topology.model.packet_delay_max = index;
@@ -397,7 +351,7 @@ int sim_coll_model_time_offset(sim_spec_t *spec)
     }
 
     /* Calculate the upper limit as closest power of 2 to the square root */
-    for (base2 = 1; base2 * base2 < spec->node_total_size; base2 = base2 * 2);
+    for (base2 = 1; base2 * base2 < spec->node_total_count; base2 = base2 * 2);
 
     for (index = 1; ((index <= base2) && (ret_val != ERROR)); index <<= 1) {
     	spec->topology.model.time_offset_max = index;
@@ -532,7 +486,7 @@ int sim_coll_parse_args(int argc, char **argv, sim_spec_t *spec)
             break;
 
         case 'p':
-            spec->node_total_size = atoi(optarg);
+            spec->node_total_count = atoi(optarg);
             break;
 
         case 'r':
@@ -582,46 +536,6 @@ int sim_coll_parse_args(int argc, char **argv, sim_spec_t *spec)
     return OK;
 }
 
-int sim_calc_procs(sim_spec_t *spec)
-{
-    int ret_val = OK;
-    int index;
-    unsigned orig_count = spec->node_group_count;
-
-    if (spec->node_total_size != 0) {
-        spec->node_group_size = spec->node_total_size / spec->node_group_count;
-        spec->node_total_size = spec->node_group_size * spec->node_group_count;
-        spec->bitfield_size = CALC_BITFIELD_SIZE(spec->node_total_size);
-        return sim_coll_model(spec);
-    }
-
-    for (index = 2;
-         ((__builtin_clz(index)) && (ret_val != ERROR));
-         index <<= 1) {
-
-        if ((index < MULTIPROCESS_ABSOLUTE_THRESHOLD) ||
-            (index < MULTIPROCESS_RELATIVE_THRESHOLD * orig_count)) {
-            if (spec->node_group_index != 0) {
-                continue;
-            }
-
-            spec->node_group_count = 1;
-            spec->node_group_size = index;
-            spec->node_total_size = index;
-        } else {
-            spec->node_group_count = orig_count;
-            spec->node_group_size = index / orig_count;
-            spec->node_total_size = spec->node_group_size * orig_count;
-        }
-        spec->bitfield_size = CALC_BITFIELD_SIZE(spec->node_total_size);
-
-        ret_val = sim_coll_model(spec);
-    }
-
-    spec->model = COLLECTIVE_MODEL_ALL;
-    return ret_val;
-}
-
 int main(int argc, char **argv)
 {
     int ret_val;
@@ -647,7 +561,7 @@ int main(int argc, char **argv)
 
     MPI_Init(&argc,&argv);
 
-    ret_val = MPI_Comm_rank(MPI_COMM_WORLD, (int*)&spec.topology.node_group_index);
+    ret_val = MPI_Comm_rank(MPI_COMM_WORLD, (int*)&spec.node_group_index);
     if (ret_val != MPI_SUCCESS) {
         goto finalize;
     }
@@ -701,7 +615,17 @@ int main(int argc, char **argv)
                "min_msgs,max_msgs,msgs_avg,min_data,max_data,data_avg\n");
     }
 
-    ret_val = sim_coll_procs(&spec);
+    if (spec->node_total_count) {
+    	ret_val = sim_coll_model(spec);
+    } else {
+    	unsigned nodes_log;
+    	for (nodes_log = 1;
+    		 (nodes_log < (sizeof(unsigned)<<3)) && (ret_val == OK);
+    		 nodes_log++) {
+    		spec->node_total_count = 1 << nodes_log;
+    		ret_val = sim_coll_model(spec);
+    	}
+    }
 
     if ((spec.node_group_index == 0) &&
         (spec.test_node_index == 0)) {
@@ -710,10 +634,6 @@ int main(int argc, char **argv)
         } else {
             printf("Run completed successfully!\n");
         }
-    }
-
-    if (spec.ctx != NULL) {
-        sim_coll_ctx_free(&spec);
     }
 
 finalize:
