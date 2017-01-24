@@ -47,7 +47,8 @@ int state_create(topology_spec_t *spec, state_t *old_state, state_t **new_state)
     	ctx = old_state;
     	memset(ctx->new_matrix, 0, CTX_MATRIX_SIZE(ctx));
     	memset(ctx->old_matrix, 0, CTX_MATRIX_SIZE(ctx));
-    	memset(ctx->stats, 0, sizeof(ctx->stats));
+    	memset(&ctx->stats, 0, sizeof(ctx->stats));
+    	spec->my_bitfield = GET_OLD_BITFIELD(ctx, spec->my_rank);
     } else {
     	ctx = calloc(1, sizeof(*ctx));
 		if (ctx == NULL) {
@@ -88,7 +89,8 @@ int state_create(topology_spec_t *spec, state_t *old_state, state_t **new_state)
 
 	for (index = 0; index < spec->local_node_count; index++) {
 		/* fill the initial bits (each node hold it's own data) */
-		SET_BIT(ctx, index, index + ctx->local_node_count * ctx->my_group_index);
+		SET_BIT(ctx, index, index
+		        + (ctx->local_node_count * ctx->my_group_index));
 
 		/* initialize the iterators over the topology requested */
 		spec->my_rank = index;
@@ -169,7 +171,9 @@ static inline int state_enqueue(state_t *state, group_id destiantion_group,
 }
 
 /* generate a list of packets to be sent out to other peers (for MPI_Alltoallv) */
-int state_generate_next_step(state_t *state, void **sendbuf, int **sendcounts, int **sdispls)
+int state_generate_next_step(state_t *state, void **sendbuf,
+                             int **sendcounts, int **sdispls,
+                             unsigned long *total)
 {
 	int ret_val;
 	unsigned distance;
@@ -262,6 +266,7 @@ int state_generate_next_step(state_t *state, void **sendbuf, int **sendcounts, i
 	*sendbuf = state->send.buf;
 	*sendcounts = state->send.counts;
 	*sdispls = state->send.displs;
+	*total = send_iterator - state->send.buf;
 	return OK;
 }
 
@@ -279,8 +284,9 @@ int state_process_next_step(state_t *state, const char *incoming, unsigned lengt
     return IS_ALL_FULL(state);
 }
 
-int state_get_raw_stats(state_t *state, raw_stats_t *stats) {
-	memcpy(stats, state->stats, sizeof(*stats));
+int state_get_raw_stats(state_t *state, raw_stats_t *stats)
+{
+	memcpy(stats, &state->stats, sizeof(*stats));
 	return OK;
 }
 

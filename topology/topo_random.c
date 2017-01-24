@@ -30,11 +30,11 @@ int random_next(comm_graph_t *graph, topology_spec_t *spec, node_id *target, uns
     case COLLECTIVE_TOPOLOGY_RANDOM_VARIABLE_LINEAR: /* After every <radix> random steps - add one const step to the cycle */
     case COLLECTIVE_TOPOLOGY_RANDOM_VARIABLE_EXPONENTIAL: /* After every <radix> random steps - double the non-random steps in the cycle */
         cycle_len = spec->topology.random.cycle_random + spec->topology.random.cycle_const;
-        if ((spec->stats.step_index % cycle_len) < spec->topology.random.cycle_random) {
+        if ((spec->step_index % cycle_len) < spec->topology.random.cycle_random) {
         	next_target = CYCLIC_RANDOM(spec, spec->node_count);
         } else {
             /* Send to a node of increasing distance */
-        	next_target = (spec->my_rank + spec->stats.step_index) % spec->node_count;
+        	next_target = (spec->my_rank + spec->step_index) % spec->node_count;
         }
         break;
 
@@ -67,7 +67,7 @@ int random_next(comm_graph_t *graph, topology_spec_t *spec, node_id *target, uns
     }
 
     /* Update step count, and cycle proportions for random hybrids */
-    if (cycle_len && (spec->stats.step_index % cycle_len == 0)) {
+    if (cycle_len && (spec->step_index % cycle_len == 0)) {
         switch (spec->topology_type)
         {
         case COLLECTIVE_TOPOLOGY_RANDOM_VARIABLE_LINEAR: /* After every <radix> random steps - add one const step to the cycle */

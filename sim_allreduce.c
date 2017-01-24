@@ -16,10 +16,12 @@ typedef struct sim_spec
 	state_t *state;
 	topology_spec_t topology;
 	optimization_t recv;
+    MPI_Comm mpi_comm;
 
-    group_id node_group_index; /* Index of this node group */
-    group_id node_group_count; /* Total number of groups */
-	unsigned node_total_count; /* Total number of nodes */
+    group_id node_group_index;     /* Index of this node group */
+    group_id node_group_count;     /* Total number of groups */
+	unsigned node_total_count;     /* Total number of nodes */
+	unsigned last_node_total_size; /* OPTIMIZATION */
 
 	unsigned test_count;       /* for statistical purposes */
     unsigned step_count;       /* 0 to run until -1 is returned */
@@ -43,28 +45,31 @@ enum split_mode {
 
 int sim_test_iteration_step(sim_spec_t *spec)
 {
-	unsigned peer_count = spec->topology.node_group_count;
+	unsigned peer_count = spec->node_group_count;
 	void *sendbuf, *recvbuf = spec->recv.buf;
 	int *sendcounts, *recvcounts = spec->recv.counts;
 	int *sdispls, *rdispls = spec->recv.displs;
 	int len, ret_val, i;
+	unsigned long total;
 
 	/* run the next step of this iteration of the test, generate output */
-	ret_val = state_generate_next_step(spec->state, &sendbuf, &sendcounts, &sdispls);
+	ret_val = state_generate_next_step(spec->state, &sendbuf,
+	        &sendcounts, &sdispls, &total);
 	if (ret_val != OK) {
 		return ret_val;
 	}
 
 	/* determine the sum of output packets on all peers waiting to be sent */
 	ret_val = MPI_Alltoall(sendcounts, 1, MPI_INT,
-						   recvcounts, 1, MPI_INT, MPI_COMM_WORLD);
+						   recvcounts, 1, MPI_INT,
+						   spec->mpi_comm);
 	if (ret_val != OK) {
 		return ret_val;
 	}
 
 	/* special case: localhost only */
 	if (peer_count == 1) {
-		return state_process_next_step(sendbuf, sendcounts, sdispls);
+		return state_process_next_step(spec->state, sendbuf, total);
 	}
 
 	/* calculate the displacements for the next MPI_Alltoallv() */
@@ -90,7 +95,7 @@ int sim_test_iteration_step(sim_spec_t *spec)
 	/* exchange information between peers */
 	ret_val = MPI_Alltoallv(sendbuf, sendcounts, sdispls, MPI_BYTE,
 			                recvbuf, recvcounts, rdispls, MPI_BYTE,
-				            MPI_COMM_WORLD);
+			                spec->mpi_comm);
 	if (ret_val != OK) {
 		return ret_val;
 	}
@@ -105,10 +110,12 @@ int sim_test_iteration(sim_spec_t *spec, raw_stats_t *stats)
     state_t *old_state = spec->state;
 
     /* invalidate cached "old state" if the process count has changed */
-    if (old_state && (spec->last_node_total_size != spec->node_total_size)) {
+    if (old_state &&
+        (spec->last_node_total_size != spec->node_total_count)) {
         state_destroy(old_state);
+        old_state = NULL;
     }
-    spec->last_node_total_size = spec->node_total_size;
+    spec->last_node_total_size = spec->node_total_count;
 
     /* Create a new state for this iteration of the test */
     ret_val = state_create(&spec->topology, old_state, &spec->state);
@@ -122,7 +129,7 @@ int sim_test_iteration(sim_spec_t *spec, raw_stats_t *stats)
     	/* Run <step_count> steps */
         while ((spec->topology.step_index < spec->step_count) && (!ret_val))
         {
-            ret_val = sim_test_iteration_step(spec->state);
+            ret_val = sim_test_iteration_step(spec);
             spec->topology.step_index++;
         }
     }
@@ -131,17 +138,16 @@ int sim_test_iteration(sim_spec_t *spec, raw_stats_t *stats)
     	/* Run until everybody completes (unlimited) */
         while (ret_val == OK)
         {
-            ret_val = sim_test_iteration_step(spec->state);
+            ret_val = sim_test_iteration_step(spec);
             spec->topology.step_index++;
         }
     }
-
 
     if (ret_val == ERROR) {
     	return ERROR;
     }
 
-    ret_val = state_get_raw_stats(stats);
+    ret_val = state_get_raw_stats(spec->state, stats);
     stats->step_counter = (unsigned long)spec->topology.step_index;
     return ret_val;
 }
@@ -159,7 +165,7 @@ int sim_test(sim_spec_t *spec)
 
     /* sanity check */
     if ((group_counter) && (node_counter % PROCESS_NODE_CAPACITY)) {
-    	return ERRROR;
+    	return ERROR;
     }
 
     /* no need to collect statistics on deterministic algorithms */
@@ -169,27 +175,35 @@ int sim_test(sim_spec_t *spec)
             aggregate = 0;
     }
 
-    /* unused processes (for this test) should not proceed */
-    if ((spec->node_group_index > group_counter) && (test_count == 1)) {
-    	return OK;
-    }
-
+    /* Check if nodes exceed single process capacity */
     if (group_counter) {
-    	/* Distribute nodes among processes */
-    	if ()
+        /* Distribute nodes among processes */
+        if (spec->node_group_index < group_counter) {
+            spec->topology.local_node_count = PROCESS_NODE_CAPACITY;
+        } else {
+            test_count = 0;
+        }
+
+        ret_val = MPI_Comm_split(MPI_COMM_WORLD,
+                test_count, spec->node_group_index,
+                &spec->mpi_comm);
+        if (ret_val != MPI_SUCCESS) {
+            return ERROR;
+        }
     } else {
         /* Distribute tests among processes */
-		if (spec->node_group_index) {
-			test_count /= spec->node_group_count;
-		} else {
-			test_count = (test_count / spec->node_group_count)
-					+ (test_count % spec->node_group_count);
-		}
+        if (spec->node_group_index) {
+            test_count /= spec->node_group_count;
+        } else {
+            test_count = (test_count / spec->node_group_count)
+                    + (test_count % spec->node_group_count);
+        }
+        spec->mpi_comm = MPI_COMM_WORLD;
     }
+    spec->topology.node_count = spec->node_total_count;
 
     while ((test_index < test_count) && (ret_val != ERROR))
     {
-
     	/* Run the a single iteration (independent) of the test */
         ret_val = sim_test_iteration(spec, &raw);
 
@@ -203,36 +217,30 @@ int sim_test(sim_spec_t *spec)
 
     /* If multiple tests were done on multiple processes - aggregate */
     if (aggregate) {
-        sim_coll_stats_aggregate(&spec->steps, is_root);
+        stats_aggregate(&spec->steps, is_root);
+        stats_aggregate(&spec->msgs, is_root);
+        stats_aggregate(&spec->data, is_root);
     }
 
-    spec->steps.avg = (float)spec->steps.sum / spec->steps.cnt;
-
-#if defined(MPI_SPLIT_PROCS) || defined(MPI_SPLIT_TESTS)
-    if (aggregate) {
-        sim_coll_stats_aggregate(&spec->msgs, is_root);
-        sim_coll_stats_aggregate(&spec->data, is_root);
-    }
-#endif
-    spec->msgs.avg = (float)spec->msgs.sum / spec->msgs.cnt;
-    spec->data.avg = (float)spec->data.sum / spec->data.cnt;
-
-#ifdef MPI_SPLIT_TESTS
-    if ((is_root) && (spec->test_node_index == 0)) {
-#else
     if (spec->node_group_index == 0) {
-#endif
         printf("%i,%i,%i,%i,%i,%i,%.1f,%i",
-               spec->node_total_size, spec->model, spec->topology,
-               spec->tree_radix, spec->offset_max, spec->delay_max,
-               spec->fail_rate, spec->test_count);
-        sim_coll_stats_print(&spec->steps);
-        sim_coll_stats_print(&spec->msgs);
-        sim_coll_stats_print(&spec->data);
-        printf("\t%i:%i", spec->random_up, spec->random_down);
+               spec->node_total_count,
+               spec->topology.model_type,
+               spec->topology.topology_type,
+               spec->topology.topology.tree.radix,
+               spec->topology.model.time_offset_max,
+               spec->topology.model.packet_delay_max,
+               spec->topology.model.packet_drop_rate,
+               spec->test_count);
+        stats_print(&spec->steps);
+        stats_print(&spec->msgs);
+        stats_print(&spec->data);
         printf("\n");
     }
 
+    if (group_counter) {
+        MPI_Comm_free(&spec->mpi_comm);
+    }
     return ret_val;
 }
 
@@ -531,9 +539,9 @@ int sim_coll_parse_args(int argc, char **argv, sim_spec_t *spec)
         return ERROR;
     }
 
-    spec->node_group_size = spec->node_total_size /
-            spec->node_group_count;
-    return OK;
+    spec->topology.local_node_count = spec->node_total_count
+            / spec->node_group_count;
+    return (spec->node_total_count % spec->node_group_count) ? ERROR : OK;
 }
 
 int main(int argc, char **argv)
@@ -545,6 +553,29 @@ int main(int argc, char **argv)
     spec.topology.model_type = COLLECTIVE_MODEL_ALL;
     spec.topology.topology_type = COLLECTIVE_TOPOLOGY_ALL;
     spec.test_count = 1;
+
+    MPI_Init(&argc,&argv);
+
+    ret_val = MPI_Comm_rank(MPI_COMM_WORLD, (int*)&spec.node_group_index);
+    if (ret_val != MPI_SUCCESS) {
+        goto finalize;
+    }
+
+    ret_val = MPI_Comm_size(MPI_COMM_WORLD, (int*)&spec.node_group_count);
+    if (ret_val != MPI_SUCCESS) {
+        goto finalize;
+    }
+
+    spec.topology.topology.random.random_seed += spec.node_group_index;
+    ret_val = MPI_Comm_rank(MPI_COMM_WORLD, (int*)&spec.node_group_index);
+    if (ret_val != MPI_SUCCESS) {
+        goto finalize;
+    }
+
+    ret_val = MPI_Comm_size(MPI_COMM_WORLD, (int*)&spec.node_group_count);
+    if (ret_val != MPI_SUCCESS) {
+        goto finalize;
+    }
 
     if (sim_coll_parse_args(argc, argv, &spec))
     {
@@ -559,29 +590,6 @@ int main(int argc, char **argv)
     }
 #endif
 
-    MPI_Init(&argc,&argv);
-
-    ret_val = MPI_Comm_rank(MPI_COMM_WORLD, (int*)&spec.node_group_index);
-    if (ret_val != MPI_SUCCESS) {
-        goto finalize;
-    }
-
-    ret_val = MPI_Comm_size(MPI_COMM_WORLD, (int*)&spec.node_group_count);
-    if (ret_val != MPI_SUCCESS) {
-        goto finalize;
-    }
-
-    spec.random_seed += spec.test_node_index;
-    ret_val = MPI_Comm_rank(MPI_COMM_WORLD, (int*)&spec.node_group_index);
-    if (ret_val != MPI_SUCCESS) {
-        goto finalize;
-    }
-
-    ret_val = MPI_Comm_size(MPI_COMM_WORLD, (int*)&spec.node_group_count);
-    if (ret_val != MPI_SUCCESS) {
-        goto finalize;
-    }
-
     /* For reproducability - use only highest-power-of-2 first processes */
     if (__builtin_popcount(spec.node_group_count) != 1) {
         if (spec.node_group_index == 0) {
@@ -591,10 +599,7 @@ int main(int argc, char **argv)
         goto finalize;
     }
 
-    spec.random_seed += spec.node_group_index;
-
-    if ((spec.node_group_index == 0) &&
-        (spec.test_node_index == 0)) {
+    if (spec.node_group_index == 0) {
         printf("Execution specification:\n"
                 "model=%i "
                 "topology=%i "
@@ -605,9 +610,12 @@ int main(int argc, char **argv)
                 "node_group_index=%i "
                 "node_group_count=%i "
                 "node_group_size=%i\n",
-                spec.model, spec.topology, spec.step_count, spec.test_count,
-                spec.tree_radix, spec.random_seed, spec.node_group_index,
-                spec.node_group_count, spec.node_group_size);
+                spec.topology.model_type, spec.topology.topology_type,
+                spec.step_count, spec.test_count,
+                spec.topology.topology.tree.radix,
+                spec.topology.topology.random.random_seed,
+                spec.node_group_index, spec.node_group_count,
+                spec.node_group_count);
 
         /* CSV header */
         printf("np,model,topo,radix,max_offset,max_delay,"
@@ -615,20 +623,19 @@ int main(int argc, char **argv)
                "min_msgs,max_msgs,msgs_avg,min_data,max_data,data_avg\n");
     }
 
-    if (spec->node_total_count) {
-    	ret_val = sim_coll_model(spec);
+    if (spec.node_total_count) {
+        ret_val = sim_coll_model(&spec);
     } else {
-    	unsigned nodes_log;
-    	for (nodes_log = 1;
-    		 (nodes_log < (sizeof(unsigned)<<3)) && (ret_val == OK);
-    		 nodes_log++) {
-    		spec->node_total_count = 1 << nodes_log;
-    		ret_val = sim_coll_model(spec);
-    	}
+        unsigned nodes_log;
+        for (nodes_log = 1;
+             (nodes_log < (sizeof(unsigned)<<3)) && (ret_val == OK);
+             nodes_log++) {
+            spec.node_total_count = 1 << nodes_log;
+            ret_val = sim_coll_model(&spec);
+        }
     }
 
-    if ((spec.node_group_index == 0) &&
-        (spec.test_node_index == 0)) {
+    if (spec.node_group_index == 0) {
         if (ret_val == ERROR) {
             printf("Failure stopped the run!\n");
         } else {

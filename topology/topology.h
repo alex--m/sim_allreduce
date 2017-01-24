@@ -42,6 +42,7 @@ typedef struct topology_spec
 	node_id my_rank;
 	node_id node_count;
 	node_id local_node_count;
+	unsigned char *my_bitfield;
 
 	unsigned step_index; /* struct abuse in favor of optimization */
 
@@ -80,7 +81,7 @@ typedef struct topo_funcs
 	int (*build_f)(topology_spec_t *spec, comm_graph_t **graph);
 	int (*start_f)(topology_spec_t *spec, comm_graph_t *graph, void **internal_ctx);
 	int (*next_f)(comm_graph_t *graph, void *internal_ctx, node_id *target, unsigned *distance);
-	int (*fix_f)();
+	int (*fix_f)(comm_graph_t *graph, void *internal_ctx, node_id broken);
 	int (*end_f)(void *internal_ctx);
 } topo_funcs_t;
 

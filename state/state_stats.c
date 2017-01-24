@@ -2,11 +2,6 @@
 #include <stdio.h>
 #include "state.h"
 
-void stats_init(struct stats *stats)
-{
-    memset(stats, 0, sizeof(*stats));
-}
-
 void stats_calc(struct stats *stats, unsigned long value)
 {
     stats->cnt++;
@@ -28,7 +23,11 @@ void stats_aggregate(struct stats *stats, int is_root)
         MPI_Reduce(MPI_IN_PLACE, &stats->sum, 1, MPI_UNSIGNED_LONG, MPI_SUM, 0, MPI_COMM_WORLD);
         MPI_Reduce(MPI_IN_PLACE, &stats->min, 1, MPI_UNSIGNED_LONG, MPI_MIN, 0, MPI_COMM_WORLD);
         MPI_Reduce(MPI_IN_PLACE, &stats->max, 1, MPI_UNSIGNED_LONG, MPI_MAX, 0, MPI_COMM_WORLD);
+        stats->avg = (float)stats->sum / stats->cnt;
     } else {
+        if (stats->min == 0) {
+            stats->min = (unsigned long)-1;
+        }
         MPI_Reduce(&stats->cnt, 0, 1, MPI_UNSIGNED_LONG, MPI_SUM, 0, MPI_COMM_WORLD);
         MPI_Reduce(&stats->sum, 0, 1, MPI_UNSIGNED_LONG, MPI_SUM, 0, MPI_COMM_WORLD);
         MPI_Reduce(&stats->min, 0, 1, MPI_UNSIGNED_LONG, MPI_MIN, 0, MPI_COMM_WORLD);

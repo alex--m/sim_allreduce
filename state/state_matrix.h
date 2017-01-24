@@ -23,9 +23,12 @@
     *(GET_NEW_BITFIELD(ctx, local_node) + ((node_bit + 1) >> 3)) |= \
         (1 << ((node_bit + 1) & 7))
 
-#define IS_BIT_SET(ctx, local_node, node_bit) \
-    ((*(GET_OLD_BITFIELD(ctx, local_node) + ((node_bit + 1) >> 3)) & \
+#define IS_BIT_SET_HERE(node_bit, bitfield) \
+    ((*(bitfield + ((node_bit + 1) >> 3)) & \
         (1 << ((node_bit + 1) & 7))) != 0)
+
+#define IS_BIT_SET(ctx, local_node, node_bit) \
+    IS_BIT_SET_HERE(node_bit, GET_OLD_BITFIELD(ctx, local_node))
 
 #define IS_MY_BIT_SET(ctx, node_bit) IS_BIT_SET(ctx, ctx->my_rank, node_bit)
 

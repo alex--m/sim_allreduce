@@ -1,5 +1,97 @@
 #include "topology.h"
 
+struct tree_ctx {
+    comm_graph_node_t *my_node;
+    unsigned char *my_bitfield;
+};
+
+int tree_start(topology_spec_t *spec, comm_graph_t *graph,
+                    struct tree_ctx **internal_ctx)
+{
+    *internal_ctx = malloc(sizeof(struct tree_ctx));
+    if (!*internal_ctx) {
+        return ERROR;
+    }
+
+    (*internal_ctx)->next_child_index = 0;
+    (*internal_ctx)->my_bitfield = spec->my_bitfield;
+    (*internal_ctx)->my_peers =
+            graph->nodes[spec->my_rank].directions[COMM_GRAPH_FLOW];
+}
+
+int tree_next(comm_graph_t *graph, struct tree_ctx *internal_ctx,
+                   node_id *target, unsigned *distance)
+{
+    node_id next_partner;
+
+    /* First send requires nothing */
+    if (internal_ctx->next_child_index == 0) {
+        *target = internal_ctx->my_peers->nodes[0];
+        internal_ctx->next_child_index++;
+        return OK;
+    }
+
+    /* Check for remaining peers */
+    if (internal_ctx->next_child_index > internal_ctx->my_peers->node_count) {
+        *distance = NO_PACKET;
+        return OK;
+    }
+
+    /* Wait for nodes before sending on */
+    next_partner =
+            internal_ctx->my_peers->nodes[internal_ctx->next_child_index - 1];
+    if (IS_BIT_SET_HERE(next_partner, internal_ctx->my_bitfield)) {
+        *target = internal_ctx->my_peers->nodes[internal_ctx->next_child_index++];
+    } else {
+        *distance = NO_PACKET;
+    }
+
+    return OK;
+}
+
+int tree_fix(comm_graph_t *graph, void *internal_ctx, node_id broken)
+{
+    return ERROR;
+}
+
+int tree_end(struct tree_ctx *internal_ctx)
+{
+    free(internal_ctx);
+}
+
+int tree_build(topology_spec_t *spec, comm_graph_t **graph)
+{
+    enum comm_graph_direction_count direction_count;
+
+    switch (spec->topology_type) {
+    case COLLECTIVE_TOPOLOGY_NARRAY_TREE:
+        direction_count = COMM_GRAPH_BIDI;
+        break;
+
+    case COLLECTIVE_TOPOLOGY_KNOMIAL_TREE:
+        direction_count = COMM_GRAPH_BIDI;
+        break;
+
+    case COLLECTIVE_TOPOLOGY_NARRAY_MULTIROOT_TREE:
+        direction_count = COMM_GRAPH_BIDI;
+        break;
+
+    case COLLECTIVE_TOPOLOGY_KNOMIAL_MULTIROOT_TREE:
+        direction_count = COMM_GRAPH_BIDI;
+        break;
+
+    default:
+        return ERROR;
+    }
+
+    *graph = comm_graph_create(spec->node_count, direction_count);
+    return (*graph != NULL) ? OK : ERROR;
+}
+
+int tree_fix(comm_graph_t* tree, node_id bad_node) {
+    return ERROR;
+}
+
 static comm_graph_t* build_tree(unsigned node_count,
 							    unsigned tree_radix,
 								int is_knomial,
@@ -72,41 +164,4 @@ static comm_graph_t* build_tree(unsigned node_count,
 	}
 
 	return tree;
-}
-
-int tree_build(topology_spec_t *spec, comm_graph_t **graph)
-{
-	enum comm_graph_direction_count direction_count;
-
-	switch (spec->topology_type) {
-	case COLLECTIVE_TOPOLOGY_NARRAY_TREE:
-		direction_count = COMM_GRAPH_BIDI;
-		break;
-
-	case COLLECTIVE_TOPOLOGY_KNOMIAL_TREE:
-		direction_count = COMM_GRAPH_BIDI;
-		break;
-
-	case COLLECTIVE_TOPOLOGY_NARRAY_MULTIROOT_TREE:
-		direction_count = COMM_GRAPH_BIDI;
-		break;
-
-	case COLLECTIVE_TOPOLOGY_KNOMIAL_MULTIROOT_TREE:
-		direction_count = COMM_GRAPH_BIDI;
-		break;
-
-	default:
-		return ERROR;
-	}
-
-	*graph = comm_graph_create(spec->node_count, direction_count);
-	return (*graph != NULL) ? OK : ERROR;
-}
-
-int fix_tree(comm_graph_t* tree, node_id bad_node) {
-/*
- * On the way up, if a node is broken: send to his father, then try his peers one after the other, then the grandfather, then the father's peers....
- * On the way down - send to his sons...
- */
-	return ERROR;
 }
