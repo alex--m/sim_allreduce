@@ -1,8 +1,12 @@
 #include "topology.h"
+#include "../state/state_matrix.h"
 
 struct tree_ctx {
-    comm_graph_node_t *my_node;
+    comm_graph_direction_t *my_peers_down;
+    comm_graph_direction_t *my_peers_up;
     unsigned char *my_bitfield;
+    unsigned next_wait_index;
+    unsigned next_send_index;
 };
 
 int tree_start(topology_spec_t *spec, comm_graph_t *graph,
@@ -13,39 +17,57 @@ int tree_start(topology_spec_t *spec, comm_graph_t *graph,
         return ERROR;
     }
 
-    (*internal_ctx)->next_child_index = 0;
+    (*internal_ctx)->next_wait_index = 0;
+    (*internal_ctx)->next_send_index = 0;
     (*internal_ctx)->my_bitfield = spec->my_bitfield;
-    (*internal_ctx)->my_peers =
-            graph->nodes[spec->my_rank].directions[COMM_GRAPH_FLOW];
+    (*internal_ctx)->my_peers_up =
+            graph->nodes[spec->my_rank].directions[0];
+    (*internal_ctx)->my_peers_down =
+            graph->nodes[spec->my_rank].directions[1];
+    return OK;
 }
 
 int tree_next(comm_graph_t *graph, struct tree_ctx *internal_ctx,
                    node_id *target, unsigned *distance)
 {
-    node_id next_partner;
+    node_id next_peer;
 
-    /* First send requires nothing */
-    if (internal_ctx->next_child_index == 0) {
-        *target = internal_ctx->my_peers->nodes[0];
-        internal_ctx->next_child_index++;
-        return OK;
+    /* Wait for nodes going down */
+    while (internal_ctx->next_wait_index < internal_ctx->my_peers_down->node_count) {
+    	next_peer = internal_ctx->my_peers_down->nodes[internal_ctx->next_wait_index];
+    	if (IS_BIT_SET_HERE(next_peer, internal_ctx->my_bitfield)) {
+    			internal_ctx->next_wait_index++;
+    	    } else {
+    	        *distance = NO_PACKET;
+    	        return OK;
+    	    }
     }
 
-    /* Check for remaining peers */
-    if (internal_ctx->next_child_index > internal_ctx->my_peers->node_count) {
-        *distance = NO_PACKET;
-        return OK;
+    /* Send all nodes going up */
+    while (internal_ctx->next_send_index < internal_ctx->my_peers_up->node_count) {
+    	*target = internal_ctx->my_peers_up->nodes[internal_ctx->next_send_index++];
+    	return OK;
     }
 
-    /* Wait for nodes before sending on */
-    next_partner =
-            internal_ctx->my_peers->nodes[internal_ctx->next_child_index - 1];
-    if (IS_BIT_SET_HERE(next_partner, internal_ctx->my_bitfield)) {
-        *target = internal_ctx->my_peers->nodes[internal_ctx->next_child_index++];
-    } else {
-        *distance = NO_PACKET;
+    /* Wait for nodes going up */
+    while (internal_ctx->next_wait_index < internal_ctx->my_peers_down->node_count + internal_ctx->my_peers_up->node_count) {
+    	next_peer = internal_ctx->my_peers_up->nodes[internal_ctx->next_wait_index - internal_ctx->my_peers_down->node_count];
+    	if (IS_BIT_SET_HERE(next_peer, internal_ctx->my_bitfield)) {
+    			internal_ctx->next_wait_index++;
+    	    } else {
+    	        *distance = NO_PACKET;
+    	        return OK;
+    	    }
     }
 
+    /* Send all nodes going down */
+    while (internal_ctx->next_send_index < internal_ctx->my_peers_up->node_count + internal_ctx->my_peers_down->node_count) {
+    	*target = internal_ctx->my_peers_down->nodes[internal_ctx->next_send_index++ - internal_ctx->my_peers_up->node_count];
+    	return OK;
+    }
+
+    /* No more packets to send - draw blanks... */
+    *distance = NO_PACKET;
     return OK;
 }
 
@@ -57,45 +79,10 @@ int tree_fix(comm_graph_t *graph, void *internal_ctx, node_id broken)
 int tree_end(struct tree_ctx *internal_ctx)
 {
     free(internal_ctx);
+    return OK;
 }
 
 int tree_build(topology_spec_t *spec, comm_graph_t **graph)
-{
-    enum comm_graph_direction_count direction_count;
-
-    switch (spec->topology_type) {
-    case COLLECTIVE_TOPOLOGY_NARRAY_TREE:
-        direction_count = COMM_GRAPH_BIDI;
-        break;
-
-    case COLLECTIVE_TOPOLOGY_KNOMIAL_TREE:
-        direction_count = COMM_GRAPH_BIDI;
-        break;
-
-    case COLLECTIVE_TOPOLOGY_NARRAY_MULTIROOT_TREE:
-        direction_count = COMM_GRAPH_BIDI;
-        break;
-
-    case COLLECTIVE_TOPOLOGY_KNOMIAL_MULTIROOT_TREE:
-        direction_count = COMM_GRAPH_BIDI;
-        break;
-
-    default:
-        return ERROR;
-    }
-
-    *graph = comm_graph_create(spec->node_count, direction_count);
-    return (*graph != NULL) ? OK : ERROR;
-}
-
-int tree_fix(comm_graph_t* tree, node_id bad_node) {
-    return ERROR;
-}
-
-static comm_graph_t* build_tree(unsigned node_count,
-							    unsigned tree_radix,
-								int is_knomial,
-								int is_multiroot)
 {
     /*
      * N-array tree (tree_radix=k):
@@ -116,15 +103,22 @@ static comm_graph_t* build_tree(unsigned node_count,
      *        dnomial-tree-functions.html#k_002dnomial-tree-functions
      */
 
+	unsigned node_count = spec->node_count;
+	unsigned tree_radix = spec->topology.tree.radix;
+	int is_knomial = ((spec->topology_type == COLLECTIVE_TOPOLOGY_KNOMIAL_TREE) ||
+					  (spec->topology_type == COLLECTIVE_TOPOLOGY_KNOMIAL_MULTIROOT_TREE));
+	int is_multiroot = ((spec->topology_type == COLLECTIVE_TOPOLOGY_NARRAY_MULTIROOT_TREE) ||
+						(spec->topology_type == COLLECTIVE_TOPOLOGY_KNOMIAL_MULTIROOT_TREE));
+
 	node_id child_count;
 	node_id next_child;
 	node_id next_father;
 	node_id first_child = 1;
 	node_id first_father = 0;
 
-	comm_graph_t* tree = comm_graph_create(node_count, COMM_GRAPH_BIDI);
-	if (!tree) {
-		return NULL;
+	*graph = comm_graph_create(node_count, COMM_GRAPH_BIDI);
+	if (!*graph) {
+		return ERROR;
 	}
 
 	if (tree_radix > node_count) {
@@ -135,9 +129,9 @@ static comm_graph_t* build_tree(unsigned node_count,
 		for (next_father = 0; next_father < tree_radix; next_father++) {
 			for (next_child = 0; next_child < tree_radix; next_child++) {
 				if (next_father != next_child) {
-					if (comm_graph_append(tree, next_father, next_child)) {
-						comm_graph_destroy(tree);
-						return NULL;
+					if (comm_graph_append(*graph, next_father, next_child)) {
+						comm_graph_destroy(*graph);
+						return ERROR;
 					}
 				}
 			}
@@ -150,9 +144,9 @@ static comm_graph_t* build_tree(unsigned node_count,
 			for (next_father = first_father, next_child = first_child;
 				 (next_father < first_child) && (next_child < node_count);
 				 next_father++, next_child++) {
-				if (comm_graph_append(tree, next_father, next_child)) {
-					comm_graph_destroy(tree);
-					return NULL;
+				if (comm_graph_append(*graph, next_father, next_child)) {
+					comm_graph_destroy(*graph);
+					return ERROR;
 				}
 			}
 		}
@@ -163,5 +157,5 @@ static comm_graph_t* build_tree(unsigned node_count,
 		}
 	}
 
-	return tree;
+	return OK;
 }

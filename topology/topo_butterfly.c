@@ -1,4 +1,5 @@
 #include "topology.h"
+#include "../state/state_matrix.h"
 
 struct butterfly_ctx {
     comm_graph_direction_t *my_peers;
@@ -18,6 +19,7 @@ int butterfly_start(topology_spec_t *spec, comm_graph_t *graph,
     (*internal_ctx)->my_bitfield = spec->my_bitfield;
     (*internal_ctx)->my_peers =
             graph->nodes[spec->my_rank].directions[COMM_GRAPH_FLOW];
+    return OK;
 }
 
 int butterfly_next(comm_graph_t *graph, struct butterfly_ctx *internal_ctx,
@@ -58,6 +60,7 @@ int butterfly_fix(comm_graph_t *graph, void *internal_ctx, node_id broken)
 int butterfly_end(struct butterfly_ctx *internal_ctx)
 {
     free(internal_ctx);
+    return OK;
 }
 
 int butterfly_build(topology_spec_t *spec, comm_graph_t **graph)
@@ -82,9 +85,9 @@ int butterfly_build(topology_spec_t *spec, comm_graph_t **graph)
     node_id jump_size = 1;
     node_id next_id = 0;
 
-    comm_graph_t* flow = comm_graph_create(node_count, COMM_GRAPH_FLOW);
-    if (!flow) {
-        return NULL;
+    *graph = comm_graph_create(node_count, COMM_GRAPH_FLOW);
+    if (!*graph) {
+        return ERROR;
     }
 
     if (radix > node_count) {
@@ -96,7 +99,7 @@ int butterfly_build(topology_spec_t *spec, comm_graph_t **graph)
         for (next_id = 0; next_id < node_count; next_id++) {
             for (jump = 0; jump < radix - 1; jump++) {
                 node_id group_start = next_id - (next_id % group_size);
-                comm_graph_append(flow, next_id,
+                comm_graph_append(*graph, next_id,
                                   group_start + ((jump_size * jump) % group_size));
             }
         }
@@ -104,5 +107,5 @@ int butterfly_build(topology_spec_t *spec, comm_graph_t **graph)
         group_size *= radix;
     }
 
-    return flow;
+    return OK;
 }

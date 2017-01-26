@@ -12,6 +12,16 @@ int random_start(topology_spec_t *spec, comm_graph_t *graph, topology_spec_t **i
 	return OK;
 }
 
+int random_fix(comm_graph_t *graph, void *internal_ctx, node_id broken)
+{
+	return OK;
+}
+
+int random_end(void *internal_ctx)
+{
+	return OK;
+}
+
 int random_next(comm_graph_t *graph, topology_spec_t *spec, node_id *target, unsigned *distance)
 {
     unsigned next_target;
