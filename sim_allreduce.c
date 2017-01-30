@@ -143,7 +143,7 @@ int sim_test_iteration(sim_spec_t *spec, raw_stats_t *stats)
         }
     }
 
-    if (ret_val == ERROR) {
+    if (ret_val == (-1)) { /* The only place that should compare explicitly to ERROR */
     	return ERROR;
     }
 
@@ -202,7 +202,7 @@ int sim_test(sim_spec_t *spec)
     }
     spec->topology.node_count = spec->node_total_count;
 
-    while ((test_index < test_count) && (ret_val != ERROR))
+    while ((test_index < test_count) && (ret_val == OK))
     {
     	/* Run the a single iteration (independent) of the test */
         ret_val = sim_test_iteration(spec, &raw);
@@ -259,7 +259,7 @@ int sim_coll_tree_topology(sim_spec_t *spec)
         return sim_test(spec);
     }
 
-	for (radix = 2; ((radix < 10) && (ret_val != ERROR)); radix++) {
+	for (radix = 2; ((radix < 10) && (ret_val == OK)); radix++) {
 		switch (spec->topology.topology_type) {
 		case COLLECTIVE_TOPOLOGY_RANDOM_FIXED_CONST: /* One const step for every <radix - 1> random steps */
 			spec->topology.topology.random.cycle_random = radix - 1;
@@ -299,7 +299,7 @@ int sim_coll_topology(sim_spec_t *spec)
     }
 
     for (index = 0;
-         ((index < COLLECTIVE_TOPOLOGY_ALL) && (ret_val != ERROR));
+         ((index < COLLECTIVE_TOPOLOGY_ALL) && (ret_val == OK));
          index++) {
         spec->topology.topology_type = index;
         ret_val = (spec->topology.topology_type != COLLECTIVE_TOPOLOGY_RANDOM_PURE) ?
@@ -322,7 +322,7 @@ int sim_coll_model_packet_delay(sim_spec_t *spec)
     /* Calculate the upper limit as closest power of 2 to the square root */
     for (base2 = 1; base2 * base2 < spec->node_total_count; base2 = base2 * 2);
 
-    for (index = 1; ((index <= base2) && (ret_val != ERROR)); index <<= 1) {
+    for (index = 1; ((index <= base2) && (ret_val == OK)); index <<= 1) {
     	spec->topology.model.packet_delay_max = index;
         ret_val = sim_coll_topology(spec);
     }
@@ -340,7 +340,7 @@ int sim_coll_model_packet_drop(sim_spec_t *spec)
         return sim_coll_topology(spec);
     }
 
-    for (index = 0.1; ((index < 0.6) && (ret_val != ERROR)); index += 0.2) {
+    for (index = 0.1; ((index < 0.6) && (ret_val == OK)); index += 0.2) {
     	spec->topology.model.packet_drop_rate = index;
         ret_val = sim_coll_topology(spec);
     }
@@ -361,7 +361,7 @@ int sim_coll_model_time_offset(sim_spec_t *spec)
     /* Calculate the upper limit as closest power of 2 to the square root */
     for (base2 = 1; base2 * base2 < spec->node_total_count; base2 = base2 * 2);
 
-    for (index = 1; ((index <= base2) && (ret_val != ERROR)); index <<= 1) {
+    for (index = 1; ((index <= base2) && (ret_val == OK)); index <<= 1) {
     	spec->topology.model.time_offset_max = index;
         ret_val = sim_coll_topology(spec);
     }
@@ -401,7 +401,7 @@ int sim_coll_model(sim_spec_t *spec)
     }
 
     for (index = 0;
-         ((index < COLLECTIVE_MODEL_ALL) && (ret_val != ERROR));
+         ((index < COLLECTIVE_MODEL_ALL) && (ret_val == OK));
          index++) {
     	spec->topology.model_type = index;
         ret_val = sim_coll_model_vars(spec);

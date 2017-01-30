@@ -236,13 +236,27 @@ int state_generate_next_step(state_t *state, void **sendbuf,
 				(sizeof(node_id) + CTX_BITFIELD_SIZE(state));
 	}
 
-	if (total_send_size < state->send.buf_len) {
-		state->send.buf_len *= 2;
-		state->send.buf = realloc(state->send.buf, state->send.buf_len);
-		if (!state->send.buf) {
-			return ERROR;
+	if ((total_send_size < state->send.buf_len) || (state->send.buf_len == 0)) {
+		if (state->send.buf_len == 0) {
+			state->send.buf_len = total_send_size;
+
+			state->send.counts = calloc(state->group_count, sizeof(int));
+			if (!state->send.counts) {
+				return ERROR;
+			}
+
+			state->send.displs = calloc(state->group_count, sizeof(int));
+			if (!state->send.displs) {
+				return ERROR;
+			}
+		} else {
+			state->send.buf_len *= 2;
+			state->send.buf = realloc(state->send.buf, state->send.buf_len);
+			if (!state->send.buf) {
+				return ERROR;
+			}
+			send_iterator = state->send.buf;
 		}
-		send_iterator = state->send.buf;
 	}
 
 	for (idx = 0; idx < state->group_count; idx++) {
@@ -293,10 +307,15 @@ int state_get_raw_stats(state_t *state, raw_stats_t *stats)
 /* Destroy state state_t*/
 void state_destroy(state_t *state)
 {
-#ifdef MPI_SPLIT_PROCS
-    free(ctx->targets);
-    free(ctx->packets);
-#endif
+	if (state->send.buf) {
+		free(state->send.buf);
+	}
+	if (state->send.counts) {
+		free(state->send.counts);
+	}
+	if (state->send.displs) {
+		free(state->send.displs);
+	}
 
     if (state->per_group) {
     	unsigned i;

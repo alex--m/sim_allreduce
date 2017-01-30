@@ -1,8 +1,12 @@
 #include <stdlib.h>
 #include <string.h>
 
+
+#include <stdio.h> // printf only
+
 #define OK (0)
-#define ERROR (-1)
+//#define ERROR (-1)
+#define ERROR (int)(printf("Internal error at %s, line %d.\n",__FILE__, __LINE__) && (-1))
 
 typedef unsigned long node_id;
 typedef unsigned group_id; /* each group simulates multiple nodes */
