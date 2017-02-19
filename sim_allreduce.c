@@ -59,17 +59,17 @@ int sim_test_iteration_step(sim_spec_t *spec)
 		return ret_val;
 	}
 
+	/* special case: localhost only */
+	if (peer_count == 1) {
+		return state_process_next_step(spec->state, sendbuf, total);
+	}
+
 	/* determine the sum of output packets on all peers waiting to be sent */
 	ret_val = MPI_Alltoall(sendcounts, 1, MPI_INT,
 						   recvcounts, 1, MPI_INT,
 						   spec->mpi_comm);
 	if (ret_val != OK) {
 		return ret_val;
-	}
-
-	/* special case: localhost only */
-	if (peer_count == 1) {
-		return state_process_next_step(spec->state, sendbuf, total);
 	}
 
 	/* calculate the displacements for the next MPI_Alltoallv() */
@@ -110,10 +110,21 @@ int sim_test_iteration(sim_spec_t *spec, raw_stats_t *stats)
     state_t *old_state = spec->state;
 
     /* invalidate cached "old state" if the process count has changed */
-    if (old_state &&
-        (spec->last_node_total_size != spec->node_total_count)) {
+    if (spec->last_node_total_size != spec->node_total_count) {
         state_destroy(old_state);
         old_state = NULL;
+
+        spec->recv.counts = realloc(spec->recv.counts,
+        		spec->node_group_count * sizeof(int));
+        if (!spec->recv.counts) {
+        	return ERROR;
+        }
+
+        spec->recv.displs = realloc(spec->recv.displs,
+        		spec->node_group_count * sizeof(int));
+        if (!spec->recv.displs) {
+        	return ERROR;
+        }
     }
     spec->last_node_total_size = spec->node_total_count;
 
@@ -136,10 +147,14 @@ int sim_test_iteration(sim_spec_t *spec, raw_stats_t *stats)
     else
     {
     	/* Run until everybody completes (unlimited) */
-        while (ret_val == OK)
+        while  (ret_val == OK)
         {
             ret_val = sim_test_iteration_step(spec);
             spec->topology.step_index++;
+
+            if (spec->topology.step_index > spec->topology.node_count * 5) {
+            	return ERROR; // TODO: remove...
+            }
         }
     }
 
@@ -155,8 +170,8 @@ int sim_test_iteration(sim_spec_t *spec, raw_stats_t *stats)
 int sim_test(sim_spec_t *spec)
 {
     int ret_val = OK;
-    raw_stats_t raw;
     int aggregate = 1;
+    raw_stats_t raw = {0};
     unsigned test_index = 0;
     unsigned test_count = spec->test_count;
     unsigned node_counter = spec->node_total_count;
@@ -199,8 +214,14 @@ int sim_test(sim_spec_t *spec)
                     + (test_count % spec->node_group_count);
         }
         spec->mpi_comm = MPI_COMM_WORLD;
+        spec->topology.local_node_count = node_counter;
     }
+
+    /* Prepare for subsequent test iterations */
     spec->topology.node_count = spec->node_total_count;
+    memset(&spec->steps, 0, sizeof(stats_t));
+    memset(&spec->msgs, 0, sizeof(stats_t));
+    memset(&spec->data, 0, sizeof(stats_t));
 
     while ((test_index < test_count) && (ret_val == OK))
     {
@@ -259,7 +280,9 @@ int sim_coll_tree_topology(sim_spec_t *spec)
         return sim_test(spec);
     }
 
-	for (radix = 2; ((radix < 10) && (ret_val == OK)); radix++) {
+	for (radix = 2;
+		 ((radix < 10) && (radix <= spec->node_total_count) && (ret_val == OK));
+		 radix++) {
 		switch (spec->topology.topology_type) {
 		case COLLECTIVE_TOPOLOGY_RANDOM_FIXED_CONST: /* One const step for every <radix - 1> random steps */
 			spec->topology.topology.random.cycle_random = radix - 1;
@@ -278,7 +301,7 @@ int sim_coll_tree_topology(sim_spec_t *spec)
 			break;
 
 		default:
-			spec->topology.topology.tree.radix = 0;
+			spec->topology.topology.tree.radix = radix;
 			break;
 		}
 		ret_val = sim_test(spec);
@@ -550,6 +573,7 @@ int main(int argc, char **argv)
 
     /* Set the defaults */
     sim_spec_t spec = {0};
+    spec.topology.verbose = 1;
     spec.topology.model_type = COLLECTIVE_MODEL_ALL;
     spec.topology.topology_type = COLLECTIVE_TOPOLOGY_ALL;
     spec.test_count = 1;
@@ -636,7 +660,7 @@ int main(int argc, char **argv)
     }
 
     if (spec.node_group_index == 0) {
-        if (ret_val == ERROR) {
+        if (ret_val != OK) {
             printf("Failure stopped the run!\n");
         } else {
             printf("Run completed successfully!\n");

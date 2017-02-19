@@ -39,11 +39,15 @@ int topology_iterator_create(topology_spec_t *spec, topology_iterator_t *iterato
 	memcpy(&iterator->funcs, &topo_map[map_slot], sizeof(topo_funcs_t));
 
 	/* Build the communication graph, if not built yet */
-	if (!current_reference_count++) {
+	if (current_reference_count++ == 0) {
 		assert(!current_topology);
 		ret_val = iterator->funcs.build_f(spec, &current_topology);
 		if (ret_val != OK) {
 			return ret_val;
+		}
+
+		if (map_slot == TREE) {
+			comm_graph_print(current_topology);
 		}
 	}
 
@@ -101,7 +105,8 @@ void topology_iterator_destroy(topology_iterator_t *iterator)
 		comm_graph_destroy(iterator->graph);
 	}
 
-	if (current_topology && !--current_reference_count) {
+	assert(current_reference_count);
+	if (current_topology && (--current_reference_count == 0)) {
 		comm_graph_destroy(current_topology);
 		current_topology = NULL;
 	}

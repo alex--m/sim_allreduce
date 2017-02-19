@@ -21,12 +21,14 @@ enum comm_graph_direction_count {
 typedef struct comm_graph_direction {
 	node_id node_count;
 	node_id arr_length;
-	node_id nodes[0];
+	node_id nodes[1]; /* can grow more - variable-length structure */
 } comm_graph_direction_t;
+
+typedef comm_graph_direction_t *comm_graph_direction_ptr_t;
 
 typedef struct comm_graph_node {
 	enum comm_graph_direction_count direction_count;
-	comm_graph_direction_t *directions[COMM_GRAPH_MAX_DIMENTIONS];
+	comm_graph_direction_ptr_t directions[COMM_GRAPH_MAX_DIMENTIONS];
 } comm_graph_node_t;
 
 typedef struct comm_graph {
@@ -43,3 +45,5 @@ comm_graph_t* comm_graph_clone(comm_graph_t* original);
 void comm_graph_destroy(comm_graph_t* comm_graph);
 
 int comm_graph_append(comm_graph_t* comm_graph, node_id father, node_id child);
+
+void comm_graph_print(comm_graph_t* comm_graph);

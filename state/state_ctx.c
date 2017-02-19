@@ -23,6 +23,7 @@ typedef struct state
 
 	group_id my_group_index;    /* Index of the group expressed by this state*/
 	unsigned local_node_count;  /* How many processes are expressed by this state */
+	unsigned global_node_count; /* How many processes are simulated in total */
     topology_iterator_t *procs; /* Decides which way to send at every iteration */
 
     unsigned char *new_matrix;  /* Matrix of bitwise information by source ranks */
@@ -48,15 +49,23 @@ int state_create(topology_spec_t *spec, state_t *old_state, state_t **new_state)
     	memset(ctx->new_matrix, 0, CTX_MATRIX_SIZE(ctx));
     	memset(ctx->old_matrix, 0, CTX_MATRIX_SIZE(ctx));
     	memset(&ctx->stats, 0, sizeof(ctx->stats));
-    	spec->my_bitfield = GET_OLD_BITFIELD(ctx, spec->my_rank);
+
+		for (index = 0; index < ctx->local_node_count; index++) {
+			topology_iterator_destroy(&ctx->procs[index]);
+		}
     } else {
     	ctx = calloc(1, sizeof(*ctx));
 		if (ctx == NULL) {
 			return ERROR;
 		}
 
+		ctx->verbose = spec->verbose;
+		ctx->my_group_index = spec->my_rank;
+		ctx->global_node_count = spec->node_count;
 		ctx->local_node_count = spec->local_node_count;
+		ctx->group_count = spec->node_count / spec->local_node_count;
 		CTX_BITFIELD_SIZE(ctx) = CALC_BITFIELD_SIZE(ctx->local_node_count);
+    	memset(&ctx->stats, 0, sizeof(ctx->stats));
 
 		ctx->new_matrix = calloc(1, CTX_MATRIX_SIZE(ctx));
 		if (ctx->new_matrix == NULL)
@@ -79,7 +88,7 @@ int state_create(topology_spec_t *spec, state_t *old_state, state_t **new_state)
 			return ERROR;
 		}
 
-		ctx->procs = malloc(spec->node_count * sizeof(*(ctx->procs)));
+		ctx->procs = malloc(ctx->local_node_count * sizeof(*(ctx->procs)));
 		if (ctx->procs == NULL)
 		{
 			state_destroy(ctx);
@@ -89,11 +98,11 @@ int state_create(topology_spec_t *spec, state_t *old_state, state_t **new_state)
 
 	for (index = 0; index < spec->local_node_count; index++) {
 		/* fill the initial bits (each node hold it's own data) */
-		SET_BIT(ctx, index, index
-		        + (ctx->local_node_count * ctx->my_group_index));
+		spec->my_rank = index + (ctx->local_node_count * ctx->my_group_index);
+    	spec->my_bitfield = GET_OLD_BITFIELD(ctx, spec->my_rank);
+		SET_NEW_BIT(ctx, index, spec->my_rank);
 
 		/* initialize the iterators over the topology requested */
-		spec->my_rank = index;
 		ret_val = topology_iterator_create(spec, &ctx->procs[index]);
 		if (ret_val != OK) {
 			state_destroy(ctx);
@@ -105,10 +114,10 @@ int state_create(topology_spec_t *spec, state_t *old_state, state_t **new_state)
 	return OK;
 }
 
-static inline int state_enqueue_ready(state_t *state, group_id destiantion_group,
+static inline int state_enqueue_ready(state_t *state, group_id destination_group,
 		node_id destination_local_rank, node_id source_rank)
 {
-	send_list_t *list = &state->per_group[destiantion_group];
+	send_list_t *list = &state->per_group[destination_group];
 
 	/* make sure chuck has free slots */
 	if (list->allocated == list->used) {
@@ -127,10 +136,10 @@ static inline int state_enqueue_ready(state_t *state, group_id destiantion_group
 	return OK;
 }
 
-static inline int state_enqueue_delayed(state_t *state, group_id destiantion_group,
+static inline int state_enqueue_delayed(state_t *state, group_id destination_group,
 		node_id destination_local_rank, node_id source_rank, unsigned distance)
 {
-	send_list_t *list = &state->per_group[destiantion_group];
+	send_list_t *list = &state->per_group[destination_group];
 
 	/* make sure chuck has free slots */
 	if (list->allocated == list->used) {
@@ -163,11 +172,11 @@ static inline int state_dequeue_delayed(state_t *state)
 	return OK;
 }
 
-static inline int state_enqueue(state_t *state, group_id destiantion_group,
+static inline int state_enqueue(state_t *state, group_id destination_group,
 		node_id destination_local_rank, node_id source_rank, unsigned distance)
 {
-	return distance ? state_enqueue_delayed(state, destiantion_group, destination_local_rank, source_rank, distance) :
-			state_enqueue_ready(state, destiantion_group, destination_local_rank, source_rank);
+	return distance ? state_enqueue_delayed(state, destination_group, destination_local_rank, source_rank, distance) :
+			state_enqueue_ready(state, destination_group, destination_local_rank, source_rank);
 }
 
 /* generate a list of packets to be sent out to other peers (for MPI_Alltoallv) */
@@ -178,7 +187,7 @@ int state_generate_next_step(state_t *state, void **sendbuf,
 	int ret_val;
 	unsigned distance;
 	node_id destination;
-	group_id destiantion_group;
+	group_id destination_group;
 	node_id destination_local_rank;
 	unsigned idx, jdx, total_send_size;
 
@@ -202,26 +211,39 @@ int state_generate_next_step(state_t *state, void **sendbuf,
 			// TODO: state->stats.data_len_counter += MY_POPCOUNT(state);
 
 			/* Determine which group contains this destination rank */
-			destiantion_group = destination / state->local_node_count;
+			destination_group = destination / state->local_node_count;
 			destination_local_rank = destination % state->local_node_count;
-			if (destiantion_group == state->my_group_index) {
-				MERGE_LOCAL(state, destination_local_rank, destination_local_rank);
-				return OK;
-			}
-
-			/* Register it to some sending buffer */
-			ret_val = state_enqueue(state, destiantion_group,
-					destination_local_rank, idx, distance);
-			if (ret_val != OK) {
-				return ret_val;
+			if (destination_group == state->my_group_index) {
+				MERGE_LOCAL(state, destination_local_rank, idx);
+			} else {
+				/* Register it to some sending buffer */
+				ret_val = state_enqueue(state, destination_group,
+						destination_local_rank, idx, distance);
+				if (ret_val != OK) {
+					return ret_val;
+				}
 			}
 		}
 
 	    /* Optionally, output debug information */
 	    if (state->verbose == 1) {
-	        printf("\nproc=%3i popcount:%3i ", idx, POPCOUNT(state, idx));
+	    	if (idx == 0) {
+	    		printf("\n");
+	    	}
+	        printf("\nproc=%3i popcount:%3i\t", idx, POPCOUNT(state, idx));
 	        PRINT(state, idx);
+	        if (distance != NO_PACKET) {
+		        printf(" - sends to #%lu", destination);
+	        } else {
+		        printf(" - waits...");
+	        }
 	    }
+	}
+
+	/* Just this node - we're done! */
+	if (state->group_count == 1) {
+		*total = 0;
+		return OK;
 	}
 
 	/* Check for delayed datagrams ready to be sent */
@@ -287,12 +309,14 @@ int state_generate_next_step(state_t *state, void **sendbuf,
 /* process a list of packets recieved from other peers (from MPI_Alltoallv) */
 int state_process_next_step(state_t *state, const char *incoming, unsigned length)
 {
-	unsigned message_size = sizeof(node_id) + CTX_BITFIELD_SIZE(state);
-	const char *limit = incoming + length;
+	if (length) {
+		const char *limit = incoming + length;
+		unsigned message_size = sizeof(node_id) + CTX_BITFIELD_SIZE(state);
 
-	/* Iterate over the incoming buffers */
-	for (; incoming < limit; incoming += message_size) {
-        MERGE(state, *((node_id*)incoming), ((node_id*)incoming) + 1);
+		/* Iterate over the incoming buffers */
+		for (; incoming < limit; incoming += message_size) {
+			MERGE(state, *((node_id*)incoming), ((node_id*)incoming) + 1);
+		}
 	}
 
     return IS_ALL_FULL(state);
@@ -307,6 +331,10 @@ int state_get_raw_stats(state_t *state, raw_stats_t *stats)
 /* Destroy state state_t*/
 void state_destroy(state_t *state)
 {
+	if (!state) {
+		return;
+	}
+
 	if (state->send.buf) {
 		free(state->send.buf);
 	}
@@ -315,6 +343,15 @@ void state_destroy(state_t *state)
 	}
 	if (state->send.displs) {
 		free(state->send.displs);
+	}
+
+	if (state->procs) {
+    	unsigned i;
+    	for (i = 0; i < state->local_node_count; i++) {
+    		topology_iterator_destroy(&state->procs[i]);
+    	}
+    	free(state->procs);
+    	state->procs = NULL;
 	}
 
     if (state->per_group) {
@@ -331,9 +368,6 @@ void state_destroy(state_t *state)
     }
     if (state->new_matrix) {
     	free(state->new_matrix);
-    }
-    if (state->procs) {
-    	free(state->procs);
     }
     free(state);
 }

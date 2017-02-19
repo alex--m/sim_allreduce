@@ -39,6 +39,7 @@ typedef enum model_type
 
 typedef struct topology_spec
 {
+	int verbose;
 	node_id my_rank;
 	node_id node_count;
 	node_id local_node_count;
@@ -102,6 +103,6 @@ int topology_iterator_next(topology_iterator_t *iterator, node_id *target, unsig
 
 int topology_iterator_omit(topology_iterator_t *iterator, node_id broken);
 
-void topology_destroy(topology_iterator_t *iterator);
+void topology_iterator_destroy(topology_iterator_t *iterator);
 
 //int topology_test(collective_topology_t topology, node_id node_count);
