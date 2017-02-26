@@ -1,3 +1,4 @@
+#include <assert.h>
 #include "comm_graph.h"
 
 #define COMM_GRAPH_DIRECTION_APPEND(node, direction, node_id) { \
@@ -114,6 +115,8 @@ void comm_graph_destroy(comm_graph_t* comm_graph)
 int comm_graph_append(comm_graph_t* comm_graph, node_id father, node_id child)
 {
 	comm_graph_node_t *node = &comm_graph->nodes[father];
+	assert(father < comm_graph->node_count);
+	assert(child < comm_graph->node_count);
 	COMM_GRAPH_DIRECTION_APPEND(node, 0, child);
 
 	if (comm_graph->direction_count == COMM_GRAPH_BIDI) {

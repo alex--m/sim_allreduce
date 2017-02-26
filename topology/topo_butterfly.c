@@ -5,8 +5,11 @@ struct butterfly_ctx {
     comm_graph_direction_t *my_peers;
     unsigned char *my_bitfield;
     unsigned next_child_index;
-    unsigned radix;
-    node_id extra_node; /* if non power of radix */
+    unsigned check_interval;
+
+    node_id first_extra; /* if non power of radix */
+    node_id node_count;
+    unsigned power;
 };
 
 static inline unsigned get_closest_power(node_id node_count, unsigned radix)
@@ -29,42 +32,51 @@ int butterfly_start(topology_spec_t *spec, comm_graph_t *graph,
         return ERROR;
     }
 
-    (*internal_ctx)->radix = radix;
+    (*internal_ctx)->check_interval = radix - 1;
     (*internal_ctx)->next_child_index = 0;
     (*internal_ctx)->my_bitfield = spec->my_bitfield;
+    (*internal_ctx)->node_count = spec->node_count;
     (*internal_ctx)->my_peers = graph->nodes[spec->my_rank].directions[0];
-    (*internal_ctx)->extra_node = (spec->node_count != power) ?
-    		spec->my_rank + power : 0;
+    (*internal_ctx)->first_extra = ((spec->node_count != power) &&
+    		(spec->my_rank < power)) ? (spec->my_rank + power) : 0;
+    (*internal_ctx)->power = power;
     return OK;
 }
 
 int butterfly_next(comm_graph_t *graph, struct butterfly_ctx *internal_ctx,
                    node_id *target, unsigned *distance)
 {
-    node_id next_partner;
+    node_id idx, next_peer;
 
     /* Check for remaining peers */
     if (internal_ctx->next_child_index >= internal_ctx->my_peers->node_count) {
+    	*target = -1;
         *distance = NO_PACKET;
         return OK;
     }
 
-    /* Wait for excess nodes - don't care what's the source */
-    if ((internal_ctx->next_child_index == 0) && (internal_ctx->extra_node)) {
-		if (!IS_BIT_SET_HERE(internal_ctx->extra_node,
-				internal_ctx->my_bitfield)) {
+    /* Wait for excess nodes */
+    if (internal_ctx->first_extra) {
+    	for (next_peer = internal_ctx->first_extra;
+    		 next_peer < internal_ctx->node_count;
+    		 next_peer += internal_ctx->power)
+		if (!IS_BIT_SET_HERE(next_peer, internal_ctx->my_bitfield)) {
 			*distance = NO_PACKET;
+			*target = next_peer;
 			return OK;
 		}
+		internal_ctx->first_extra = 0;
     }
 
     /* Wait for this level before ascending to the next level */
-    if (internal_ctx->next_child_index % internal_ctx->radix == 0) {
-    	for (next_partner = 0;
-    		 next_partner < internal_ctx->next_child_index;
-    		 next_partner++) {
-    		if (!IS_BIT_SET_HERE(next_partner, internal_ctx->my_bitfield)) {
+    if (internal_ctx->next_child_index % internal_ctx->check_interval == 0) {
+    	next_peer = (internal_ctx->next_child_index == 0) ? 0 :
+    			(internal_ctx->next_child_index - internal_ctx->check_interval);
+    	for (idx = next_peer; idx < internal_ctx->next_child_index; idx++) {
+    		next_peer = internal_ctx->my_peers->nodes[idx];
+    		if (!IS_BIT_SET_HERE(next_peer, internal_ctx->my_bitfield)) {
     	        *distance = NO_PACKET;
+    			*target = next_peer;
     	        return OK;
     		}
     	}
@@ -118,7 +130,7 @@ int butterfly_build(topology_spec_t *spec, comm_graph_t **graph)
     /* Set excess nodes (non power of radix) to check in */
     max_group_size = get_closest_power(node_count, radix);
     for (next_id = max_group_size; next_id < node_count; next_id++) {
-    	comm_graph_append(*graph, next_id, next_id - max_group_size);
+    	comm_graph_append(*graph, next_id, next_id % max_group_size);
     }
 
     for (jump_size = 1, group_size = radix;
@@ -136,7 +148,7 @@ int butterfly_build(topology_spec_t *spec, comm_graph_t **graph)
 
     /* Provide excess nodes (non power of radix) with the result */
     for (next_id = max_group_size; next_id < node_count; next_id++) {
-    	comm_graph_append(*graph, next_id - max_group_size, next_id);
+    	comm_graph_append(*graph, next_id % max_group_size, next_id);
     }
 
     return OK;

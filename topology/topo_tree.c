@@ -8,27 +8,20 @@ struct tree_ctx {
     unsigned char *my_bitfield;
     unsigned next_wait_index;
     unsigned next_send_index;
-    int no_wait_for_sons;
 };
 
 int tree_start(topology_spec_t *spec, comm_graph_t *graph,
                     struct tree_ctx **internal_ctx)
 {
-	int is_multiroot = ((spec->topology_type == COLLECTIVE_TOPOLOGY_NARRAY_MULTIROOT_TREE) ||
-						(spec->topology_type == COLLECTIVE_TOPOLOGY_KNOMIAL_MULTIROOT_TREE));
-
-
     *internal_ctx = malloc(sizeof(struct tree_ctx));
     if (!*internal_ctx) {
         return ERROR;
     }
 
-
-    (*internal_ctx)->no_wait_for_sons = is_multiroot &&
-    		spec->my_rank < spec->topology.tree.radix;
     (*internal_ctx)->next_wait_index = 0;
     (*internal_ctx)->next_send_index = 0;
     (*internal_ctx)->my_bitfield = spec->my_bitfield;
+    assert(graph->node_count > spec->my_rank);
     (*internal_ctx)->my_peers_up =
             graph->nodes[spec->my_rank].directions[1];
     (*internal_ctx)->my_peers_down =
@@ -41,18 +34,17 @@ int tree_next(comm_graph_t *graph, struct tree_ctx *internal_ctx,
 {
     node_id next_peer;
 
-    if (!internal_ctx->no_wait_for_sons) {
-    	/* Wait for nodes going down */
-    	while (internal_ctx->next_wait_index < internal_ctx->my_peers_down->node_count) {
-    		next_peer = internal_ctx->my_peers_down->nodes[internal_ctx->next_wait_index];
-    		if (IS_BIT_SET_HERE(next_peer, internal_ctx->my_bitfield)) {
-    			internal_ctx->next_wait_index++;
-    		} else {
-    			*distance = NO_PACKET;
-    			return OK;
-    		}
-    	}
-    }
+	/* Wait for nodes going down */
+	while (internal_ctx->next_wait_index < internal_ctx->my_peers_down->node_count) {
+		next_peer = internal_ctx->my_peers_down->nodes[internal_ctx->next_wait_index];
+		if (IS_BIT_SET_HERE(next_peer, internal_ctx->my_bitfield)) {
+			internal_ctx->next_wait_index++;
+		} else {
+			*distance = NO_PACKET;
+			*target = next_peer;
+			return OK;
+		}
+	}
 
     /* Send all nodes going up */
     while (internal_ctx->next_send_index < internal_ctx->my_peers_up->node_count) {
@@ -61,12 +53,13 @@ int tree_next(comm_graph_t *graph, struct tree_ctx *internal_ctx,
     }
 
     /* Wait for nodes going up */
-    while (internal_ctx->next_wait_index < internal_ctx->my_peers_down->node_count + internal_ctx->my_peers_up->node_count) {
+    while (internal_ctx->next_wait_index < (internal_ctx->my_peers_down->node_count + internal_ctx->my_peers_up->node_count)) {
     	next_peer = internal_ctx->my_peers_up->nodes[internal_ctx->next_wait_index - internal_ctx->my_peers_down->node_count];
     	if (IS_BIT_SET_HERE(next_peer, internal_ctx->my_bitfield)) {
     			internal_ctx->next_wait_index++;
     	    } else {
     	        *distance = NO_PACKET;
+    	        *target = next_peer;
     	        return OK;
     	    }
     }
@@ -79,6 +72,7 @@ int tree_next(comm_graph_t *graph, struct tree_ctx *internal_ctx,
 
     /* No more packets to send - draw blanks... */
     *distance = NO_PACKET;
+    *target = -1;
     return OK;
 }
 
@@ -146,6 +140,10 @@ int tree_build(topology_spec_t *spec, comm_graph_t **graph)
 					}
 				}
 			}
+		}
+		for (next_father = 0; next_father < tree_radix; next_father++) {
+			(*graph)->nodes[next_father].directions[0]->node_count = 0;
+			/* GRAPH API HACK... for correctness of multi-root trees */
 		}
 		first_child = tree_radix;
 	}

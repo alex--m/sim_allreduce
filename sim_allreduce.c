@@ -152,7 +152,7 @@ int sim_test_iteration(sim_spec_t *spec, raw_stats_t *stats)
             ret_val = sim_test_iteration_step(spec);
             spec->topology.step_index++;
 
-            if (spec->topology.step_index > spec->topology.node_count * 5) {
+            if (spec->topology.step_index > spec->topology.node_count * 10) {
             	return ERROR; // TODO: remove...
             }
         }
@@ -216,6 +216,7 @@ int sim_test(sim_spec_t *spec)
         spec->mpi_comm = MPI_COMM_WORLD;
         spec->topology.local_node_count = node_counter;
     }
+    spec->topology.my_rank = spec->node_group_index;
 
     /* Prepare for subsequent test iterations */
     spec->topology.node_count = spec->node_total_count;
@@ -249,9 +250,12 @@ int sim_test(sim_spec_t *spec)
                spec->topology.model_type,
                spec->topology.topology_type,
                spec->topology.topology.tree.radix,
-               spec->topology.model.time_offset_max,
-               spec->topology.model.packet_delay_max,
-               spec->topology.model.packet_drop_rate,
+			   (spec->topology.model_type == COLLECTIVE_MODEL_TIME_OFFSET) ?
+			   		   spec->topology.model.time_offset_max : 0,
+			   (spec->topology.model_type == COLLECTIVE_MODEL_PACKET_DELAY) ?
+					   spec->topology.model.packet_delay_max : 0,
+			   (spec->topology.model_type == COLLECTIVE_MODEL_PACKET_DROP) ?
+					   spec->topology.model.packet_drop_rate : 0,
                spec->test_count);
         stats_print(&spec->steps);
         stats_print(&spec->msgs);
@@ -613,15 +617,6 @@ int main(int argc, char **argv)
         return ERROR;
     }
 #endif
-
-    /* For reproducability - use only highest-power-of-2 first processes */
-    if (__builtin_popcount(spec.node_group_count) != 1) {
-        if (spec.node_group_index == 0) {
-            PERROR("Process count (%i) is not a power of 2.",
-                   spec.node_group_count);
-        }
-        goto finalize;
-    }
 
     if (spec.node_group_index == 0) {
         printf("Execution specification:\n"

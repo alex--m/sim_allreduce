@@ -61,6 +61,7 @@ int topology_iterator_create(topology_spec_t *spec, topology_iterator_t *iterato
 
 int topology_iterator_next(topology_iterator_t *iterator, node_id *target, unsigned *distance)
 {
+	*distance = 0;
 	switch (iterator->spec->model_type)
 	{
 	case COLLECTIVE_MODEL_PACKET_DELAY:
@@ -75,14 +76,15 @@ int topology_iterator_next(topology_iterator_t *iterator, node_id *target, unsig
 		break;
 
 	case COLLECTIVE_MODEL_TIME_OFFSET:
-        if (--iterator->time_offset) {
+        if (iterator->time_offset) {
+        	iterator->time_offset--;
 			*distance = NO_PACKET;
 			return OK;
         }
         break;
 
 	default:
-		*distance = 0;
+		break;
     }
 
 	return iterator->funcs.next_f(iterator->graph, iterator->ctx, target, distance);

@@ -29,9 +29,14 @@
     *(GET_NEW_BITFIELD(ctx, local_node) + ((node_bit + 1) >> 3)) |= \
         (1 << ((node_bit + 1) & 7))
 
-#define IS_BIT_SET_HERE(node_bit, bitfield) \
+#define _IS_BIT_SET_HERE(node_bit, bitfield) \
     ((*((bitfield) + (((node_bit) + 1) >> 3)) & \
         (1 << (((node_bit) + 1) & 7))) != 0)
+
+#define IS_FULL_HERE(bitfield) _IS_BIT_SET_HERE(-1, bitfield)
+
+#define IS_BIT_SET_HERE(node_bit, bitfield) (IS_FULL_HERE(bitfield) || \
+	_IS_BIT_SET_HERE(node_bit, bitfield))
 
 #define IS_OLD_BIT_SET(ctx, local_node, node_bit) \
     IS_BIT_SET_HERE(node_bit, GET_OLD_BITFIELD(ctx, local_node))
@@ -42,8 +47,6 @@
 #define SET_FULL(ctx, local_node) SET_NEW_BIT(ctx, local_node, -1)
 
 #define IS_FULL(ctx, local_node) IS_NEW_BIT_SET(ctx, local_node, -1)
-
-#define IS_FULL_HERE(bitfield) IS_BIT_SET_HERE(-1, bitfield)
 
 #define IS_MINE_FULL(ctx) IS_FULL((ctx), ctx->my_rank)
 
@@ -67,7 +70,7 @@
 })
 
 #define POPCOUNT(ctx, local_node) \
-	POPCOUNT_HERE(GET_OLD_BITFIELD(ctx, local_node), ctx->global_node_count)
+	POPCOUNT_HERE(GET_NEW_BITFIELD(ctx, local_node), ctx->global_node_count)
 
 #define MY_POPCOUNT(ctx) POPCOUNT(ctx, ctx->my_rank)
 
@@ -96,12 +99,14 @@
 
 #define PRINT(ctx, local_node) ({                                             \
     int i;                                                                    \
-    for (i = 0; i < (ctx)->local_node_count; i++) {                           \
-        printf("%i", IS_OLD_BIT_SET((ctx), local_node, i));                       \
-    }                                                                         \
-    printf(" NEW: ");                      \
-    for (i = 0; i < (ctx)->local_node_count; i++) {                           \
-        printf("%i", IS_NEW_BIT_SET((ctx), local_node, i));                       \
-    }                                                                         \
+    if (IS_FULL((ctx), local_node)) {                                         \
+		for (i = 0; i < (ctx)->local_node_count; i++) {                       \
+			printf("1");                                                      \
+		}                                                                     \
+    } else {                                                                  \
+		for (i = 0; i < (ctx)->local_node_count; i++) {                       \
+			printf("%i", IS_NEW_BIT_SET((ctx), local_node, i));               \
+		}                                                                     \
+	}                                                                         \
     printf(" (is_full=%i)", IS_FULL((ctx), local_node));                      \
 })

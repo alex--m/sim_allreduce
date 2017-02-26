@@ -68,15 +68,12 @@ int random_next(comm_graph_t *graph, struct random_ctx *ctx, node_id *target, un
         if ((IS_FULL_HERE(ctx->my_bitfield)) && (spec->step_index % cycle_len))
         {
             next_target = CYCLIC_RANDOM(spec, spec->node_count);
-            printf("HERE1!\n");
         } else if (IS_FULL_HERE(ctx->my_bitfield)) {
             /* Send to a node of increasing distance */
             next_target = (ctx->my_rank + spec->step_index) % spec->node_count;
-            printf("HERE2!\n");
         } else {
             /* Send to a random node missing from my (incoming) bitfield */
             unsigned iter = CYCLIC_RANDOM(spec, spec->node_count - POPCOUNT_HERE(ctx->my_bitfield, spec->node_count)) + 1;
-            printf("HERE3!\n");
             next_target = 0;
             while (iter) {
                 if (!IS_BIT_SET_HERE(next_target, ctx->my_bitfield)) {

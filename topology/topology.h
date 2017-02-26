@@ -30,9 +30,10 @@ typedef enum topology_type
 typedef enum model_type
 {
     COLLECTIVE_MODEL_ITERATIVE = 0, /* Basic collective */
-    COLLECTIVE_MODEL_PACKET_DELAY,   /* Random packet delay */
+    COLLECTIVE_MODEL_PACKET_DELAY,  /* Random packet delay */
     COLLECTIVE_MODEL_PACKET_DROP,   /* Random failure at times */
     COLLECTIVE_MODEL_TIME_OFFSET,   /* Random start time offset */
+	// TODO: COLLECTIVE_MODEL_NODE_FAILURE,  /* Node stops functioning */
 
     COLLECTIVE_MODEL_ALL /* default, must be last */
 } model_type_t;
