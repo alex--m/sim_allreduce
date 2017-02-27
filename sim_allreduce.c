@@ -577,7 +577,7 @@ int main(int argc, char **argv)
 
     /* Set the defaults */
     sim_spec_t spec = {0};
-    spec.topology.verbose = 1;
+    spec.topology.verbose = 0;
     spec.topology.model_type = COLLECTIVE_MODEL_ALL;
     spec.topology.topology_type = COLLECTIVE_TOPOLOGY_ALL;
     spec.test_count = 1;

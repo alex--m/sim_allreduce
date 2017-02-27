@@ -152,7 +152,7 @@ static inline int state_enqueue_ready(state_t *state, group_id destination_group
 	item = &list->items[list->used++];
 	item->dst = destination_local_rank;
 	item->bitfield = bitfield ;
-	return ERROR;
+	return OK;
 }
 
 static inline int state_enqueue_delayed(state_t *state, group_id destination_group,
@@ -203,7 +203,7 @@ static inline int state_enqueue_delayed(state_t *state, group_id destination_gro
 	*(group_id*)(state->delayed_data + (slot_idx * slot_size)) = destination_group;
 	memcpy(item->bitfield, GET_OLD_BITFIELD(state, source_rank), state->bitfield_size);
 	list->used++;
-	return ERROR;
+	return OK;
 }
 
 static inline int state_dequeue_delayed(state_t *state)
@@ -222,7 +222,7 @@ static inline int state_dequeue_delayed(state_t *state)
 		}
 	}
 
-	return ERROR;
+	return OK;
 }
 
 static inline int state_enqueue(state_t *state, group_id destination_group,

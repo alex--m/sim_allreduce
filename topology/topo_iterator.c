@@ -46,7 +46,7 @@ int topology_iterator_create(topology_spec_t *spec, topology_iterator_t *iterato
 			return ret_val;
 		}
 
-		if (map_slot == TREE) {
+		if ((spec->verbose) && (map_slot == TREE)) {
 			comm_graph_print(current_topology);
 		}
 	}
