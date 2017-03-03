@@ -79,7 +79,6 @@ int state_create(topology_spec_t *spec, state_t *old_state, state_t **new_state)
 		ctx->local_node_count = spec->local_node_count;
 		ctx->group_count = spec->node_count / spec->local_node_count;
 		CTX_BITFIELD_SIZE(ctx) = CALC_BITFIELD_SIZE(ctx->local_node_count);
-    	memset(&ctx->stats, 0, sizeof(ctx->stats));
 
 		ctx->new_matrix = calloc(1, CTX_MATRIX_SIZE(ctx));
 		if (ctx->new_matrix == NULL)
@@ -158,7 +157,7 @@ static inline int state_enqueue_ready(state_t *state, group_id destination_group
 static inline int state_enqueue_delayed(state_t *state, group_id destination_group,
 		node_id destination_local_rank, node_id source_rank, unsigned distance)
 {
-	unsigned slot_idx = 0, slot_size = sizeof(group_id) + state->bitfield_size;
+	unsigned slot_idx = 0, slot_size = sizeof(group_id) + CTX_BITFIELD_SIZE(state);
 	send_list_t *list = &state->delayed;
 	send_item_t *item;
 
@@ -211,7 +210,7 @@ static inline int state_dequeue_delayed(state_t *state)
 	send_item_t *item;
 	group_id destination_group;
 	send_list_t *delayed = &state->delayed;
-	unsigned slot_idx, slot_size = sizeof(group_id) + state->bitfield_size;
+	unsigned slot_idx, slot_size = sizeof(group_id) + CTX_BITFIELD_SIZE(state);
 
 	for (slot_idx = 0; slot_idx < delayed->allocated; slot_idx++) {
 		destination_group = *(group_id*)(state->delayed_data + (slot_idx * slot_size));
@@ -266,7 +265,7 @@ int state_generate_next_step(state_t *state, void **sendbuf,
 		if (distance != NO_PACKET) {
 			/* update the statistics */
 			state->stats.messages_counter++;
-			// TODO: state->stats.data_len_counter += MY_POPCOUNT(state);
+			state->stats.data_len_counter += POPCOUNT(state, idx);
 
 			/* determine which group contains this destination rank */
 			destination_group = destination / state->local_node_count;
@@ -316,11 +315,11 @@ int state_generate_next_step(state_t *state, void **sendbuf,
 
 	/* Consolidate all the sending buffers into one for an MPI_Alltoallv() */
 	for (total_send_size = 0, idx = 0; idx < state->group_count; idx++) {
-		total_send_size += state->per_group[idx].used *
-				(sizeof(node_id) + CTX_BITFIELD_SIZE(state));
+		total_send_size += state->per_group[idx].used;
 	}
+	total_send_size *= message_size;
 
-	if ((total_send_size < state->send.buf_len) || (state->send.buf_len == 0)) {
+	if ((total_send_size > state->send.buf_len) || (state->send.buf_len == 0)) {
 		if (state->send.buf_len == 0) {
 			state->send.buf_len = total_send_size;
 
@@ -334,13 +333,16 @@ int state_generate_next_step(state_t *state, void **sendbuf,
 				return ERROR;
 			}
 		} else {
-			state->send.buf_len *= 2;
-			state->send.buf = realloc(state->send.buf, state->send.buf_len);
-			if (!state->send.buf) {
-				return ERROR;
+			while (total_send_size > state->send.buf_len) {
+				state->send.buf_len *= 2;
 			}
-			send_iterator = state->send.buf;
 		}
+
+		state->send.buf = realloc(state->send.buf, state->send.buf_len);
+		if (!state->send.buf) {
+			return ERROR;
+		}
+		send_iterator = state->send.buf;
 	}
 
 	for (idx = 0; idx < state->group_count; idx++) {
@@ -348,10 +350,10 @@ int state_generate_next_step(state_t *state, void **sendbuf,
 		start = send_iterator;
 
 		/* create a message from each source+destination pair */
-		for (jdx = 0; jdx < state->per_group[idx].allocated; jdx++) {
+		for (jdx = 0; jdx < state->per_group[idx].used; jdx++) {
 			*((node_id*)send_iterator) = item->dst;
 			memcpy(((node_id*)send_iterator) + 1, item->bitfield,
-					state->bitfield_size);
+				   CTX_BITFIELD_SIZE(state));
 			send_iterator += message_size;
 			item++;
 		}
@@ -363,7 +365,7 @@ int state_generate_next_step(state_t *state, void **sendbuf,
 	*sendbuf = state->send.buf;
 	*sendcounts = state->send.counts;
 	*sdispls = state->send.displs;
-	*total = send_iterator - state->send.buf;
+	*total = total_send_size;
 	return OK;
 }
 

@@ -4,6 +4,7 @@
 #define PERROR printf
 
 #define PROCESS_NODE_CAPACITY (4096)
+#define DEFAULT_TEST_COUNT (10)
 
 #define _GNU_SOURCE
 #include <stdio.h>
@@ -75,11 +76,12 @@ int sim_test_iteration_step(sim_spec_t *spec)
 	/* calculate the displacements for the next MPI_Alltoallv() */
 	len = 0;
 	rdispls[0] = 0;
-	for (i = 0; i < peer_count; i++) {
+	for (i = 0; i < (peer_count - 1); i++) {
 		int next_size = recvcounts[i];
 		rdispls[i + 1] = rdispls[i] + next_size;
 		len += next_size;
 	}
+	len += recvcounts[i];
 
 	/* ensure the incoming buffer is large enough for the exchange */
 	if (spec->recv.buf_len < len) {
@@ -101,7 +103,9 @@ int sim_test_iteration_step(sim_spec_t *spec)
 	}
 
 	/* Use the incoming information to complete this step */
-	return state_process_next_step(spec->state, recvbuf, len);
+	ret_val = state_process_next_step(spec->state, recvbuf, len);
+	MPI_Allreduce(MPI_IN_PLACE, &ret_val, 1, MPI_INT, MPI_LAND, spec->mpi_comm);
+	return ret_val;
 }
 
 int sim_test_iteration(sim_spec_t *spec, raw_stats_t *stats)
@@ -151,10 +155,6 @@ int sim_test_iteration(sim_spec_t *spec, raw_stats_t *stats)
         {
             ret_val = sim_test_iteration_step(spec);
             spec->topology.step_index++;
-
-            if (spec->topology.step_index > spec->topology.node_count * 10) {
-            	return ERROR; // TODO: remove...
-            }
         }
     }
 
@@ -176,11 +176,20 @@ int sim_test(sim_spec_t *spec)
     unsigned test_count = spec->test_count;
     unsigned node_counter = spec->node_total_count;
     unsigned group_counter = node_counter / PROCESS_NODE_CAPACITY;
+    unsigned orig_group_index = spec->node_group_index;
+    unsigned orig_group_count = spec->node_group_count;
     int is_root = spec->node_group_index == 0;
 
     /* sanity check */
     if ((group_counter) && (node_counter % PROCESS_NODE_CAPACITY)) {
-    	return ERROR;
+    	printf("\nERROR: Process count cannot be divided by %i!\n", PROCESS_NODE_CAPACITY);
+    	exit(0);
+    }
+
+    /* required group check */
+    if (group_counter > spec->node_group_count) {
+    	printf("\nERROR: Insufficient nodes - need at least %i!\n", group_counter);
+    	exit(0);
     }
 
     /* no need to collect statistics on deterministic algorithms */
@@ -199,6 +208,7 @@ int sim_test(sim_spec_t *spec)
             test_count = 0;
         }
 
+        spec->node_group_count = group_counter;
         ret_val = MPI_Comm_split(MPI_COMM_WORLD,
                 test_count, spec->node_group_index,
                 &spec->mpi_comm);
@@ -215,6 +225,8 @@ int sim_test(sim_spec_t *spec)
         }
         spec->mpi_comm = MPI_COMM_WORLD;
         spec->topology.local_node_count = node_counter;
+        spec->node_group_index = 0;
+        spec->node_group_count = 1;
     }
     spec->topology.my_rank = spec->node_group_index;
 
@@ -230,21 +242,23 @@ int sim_test(sim_spec_t *spec)
         ret_val = sim_test_iteration(spec, &raw);
 
         /* Collect statistics */
-        stats_calc(&spec->steps, raw.step_counter);
-        stats_calc(&spec->msgs, raw.messages_counter);
-        stats_calc(&spec->data, raw.data_len_counter);
+        stats_calc(&spec->steps, raw.step_counter, is_root, NULL);
+        stats_calc(&spec->msgs, raw.messages_counter, is_root,
+        		(group_counter > 1) ? spec->mpi_comm : NULL);
+        stats_calc(&spec->data, raw.data_len_counter, is_root,
+        		(group_counter > 1) ? spec->mpi_comm : NULL);
 
         test_index++;
     }
 
     /* If multiple tests were done on multiple processes - aggregate */
-    if (aggregate) {
-        stats_aggregate(&spec->steps, is_root);
-        stats_aggregate(&spec->msgs, is_root);
-        stats_aggregate(&spec->data, is_root);
+    if ((aggregate) && (group_counter > 1)) {
+        stats_aggregate(&spec->steps, is_root, spec->mpi_comm);
+        stats_aggregate(&spec->msgs, is_root, spec->mpi_comm);
+        stats_aggregate(&spec->data, is_root, spec->mpi_comm);
     }
 
-    if (spec->node_group_index == 0) {
+    if (orig_group_index == 0) {
         printf("%i,%i,%i,%i,%i,%i,%.1f,%i",
                spec->node_total_count,
                spec->topology.model_type,
@@ -256,7 +270,7 @@ int sim_test(sim_spec_t *spec)
 					   spec->topology.model.packet_delay_max : 0,
 			   (spec->topology.model_type == COLLECTIVE_MODEL_PACKET_DROP) ?
 					   spec->topology.model.packet_drop_rate : 0,
-               spec->test_count);
+			   aggregate ? spec->test_count : test_count);
         stats_print(&spec->steps);
         stats_print(&spec->msgs);
         stats_print(&spec->data);
@@ -266,6 +280,9 @@ int sim_test(sim_spec_t *spec)
     if (group_counter) {
         MPI_Comm_free(&spec->mpi_comm);
     }
+
+    spec->node_group_index = orig_group_index;
+    spec->node_group_count = orig_group_count;
     return ret_val;
 }
 
@@ -491,7 +508,7 @@ int sim_coll_parse_args(int argc, char **argv, sim_spec_t *spec)
                 {0,                0,                 0,  0  },
         };
 
-        c = getopt_long(argc, argv, "hm:t:p:g:r:f:d:o:i:",
+        c = getopt_long(argc, argv, "hvm:t:p:g:r:f:d:o:i:",
                 long_options, &option_index);
         if (c == -1)
             break;
@@ -549,6 +566,9 @@ int sim_coll_parse_args(int argc, char **argv, sim_spec_t *spec)
             spec->test_count = atoi(optarg);
             break;
 
+        case 'v':
+        	spec->topology.verbose = 1;
+        	break;
 
         case 'h':
         default:
@@ -580,9 +600,9 @@ int main(int argc, char **argv)
     spec.topology.verbose = 0;
     spec.topology.model_type = COLLECTIVE_MODEL_ALL;
     spec.topology.topology_type = COLLECTIVE_TOPOLOGY_ALL;
-    spec.test_count = 1;
+    spec.test_count = DEFAULT_TEST_COUNT;
 
-    MPI_Init(&argc,&argv);
+    MPI_Init(&argc, &argv);
 
     ret_val = MPI_Comm_rank(MPI_COMM_WORLD, (int*)&spec.node_group_index);
     if (ret_val != MPI_SUCCESS) {
@@ -595,16 +615,6 @@ int main(int argc, char **argv)
     }
 
     spec.topology.topology.random.random_seed += spec.node_group_index;
-    ret_val = MPI_Comm_rank(MPI_COMM_WORLD, (int*)&spec.node_group_index);
-    if (ret_val != MPI_SUCCESS) {
-        goto finalize;
-    }
-
-    ret_val = MPI_Comm_size(MPI_COMM_WORLD, (int*)&spec.node_group_count);
-    if (ret_val != MPI_SUCCESS) {
-        goto finalize;
-    }
-
     if (sim_coll_parse_args(argc, argv, &spec))
     {
         return ERROR;

@@ -1,3 +1,4 @@
+#include <mpi.h>
 #include "../topology/topology.h"
 
 typedef struct state state_t;
@@ -25,9 +26,9 @@ typedef struct exchange_optimization
 	int *displs;
 } optimization_t;
 
-void stats_calc(struct stats *stats, unsigned long value);
+void stats_calc(struct stats *stats, unsigned long value, int is_root, MPI_Comm comm);
 
-void stats_aggregate(struct stats *stats, int is_root);
+void stats_aggregate(struct stats *stats, int is_root, MPI_Comm comm);
 
 void stats_print(struct stats *stats);
 
