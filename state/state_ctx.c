@@ -13,6 +13,7 @@ typedef struct exchange_plan
 typedef struct send_item
 {
 	node_id dst;
+	node_id src;
 	unsigned char *bitfield; // NULL means vacant
 } send_item_t;
 
@@ -35,6 +36,7 @@ typedef struct state
     unsigned char *new_matrix;  /* Matrix of bitwise information by source ranks */
     unsigned char *old_matrix;  /* Previous step of the matrix */
 
+    unsigned active_count_down; /* How many local nodes are still active */
     unsigned group_count;       /* Total amount of groups */
     send_list_t *per_group;     /* Storing packets sent for the next iteration */
     send_list_t delayed;        /* Storing packets for future iterations (distance) */
@@ -42,6 +44,7 @@ typedef struct state
     optimization_t send;        /* Recycled buffers for sending */
 
 	int verbose;
+    unsigned death_timeout;     /* Steps it takes to "give up" and mark a node dead */
 	raw_stats_t stats;
 } state_t;
 
@@ -114,6 +117,7 @@ int state_create(topology_spec_t *spec, state_t *old_state, state_t **new_state)
 		spec->my_rank = index + (ctx->local_node_count * ctx->my_group_index);
     	spec->my_bitfield = GET_OLD_BITFIELD(ctx, spec->my_rank);
 		SET_NEW_BIT(ctx, index, spec->my_rank);
+		SET_LIVE(ctx, index);
 
 		/* initialize the iterators over the topology requested */
 		ret_val = topology_iterator_create(spec, &ctx->procs[index]);
@@ -123,12 +127,13 @@ int state_create(topology_spec_t *spec, state_t *old_state, state_t **new_state)
 		}
 	}
 
+	ctx->active_count_down = spec->local_node_count;
 	*new_state = ctx;
 	return OK;
 }
 
 static inline int state_enqueue_ready(state_t *state, group_id destination_group,
-		node_id destination_local_rank, unsigned char* bitfield)
+		node_id destination_local_rank, node_id source_rank, unsigned char* bitfield)
 {
 	send_list_t *list = &state->per_group[destination_group];
 	send_item_t *item;
@@ -197,6 +202,7 @@ static inline int state_enqueue_delayed(state_t *state, group_id destination_gro
 
 	/* fill the slot with the packet to be sent later */
 	item = &list->items[slot_idx];
+	item->src = source_rank;
 	item->dst = destination_local_rank;
 	item->bitfield = state->delayed_data + (slot_idx * slot_size) + sizeof(group_id);
 	*(group_id*)(state->delayed_data + (slot_idx * slot_size)) = destination_group;
@@ -216,7 +222,7 @@ static inline int state_dequeue_delayed(state_t *state)
 		destination_group = *(group_id*)(state->delayed_data + (slot_idx * slot_size));
 		if (-1 != destination_group) {
 			item = &delayed->items[slot_idx];
-			state_enqueue_ready(state, destination_group, item->dst, item->bitfield);
+			state_enqueue_ready(state, destination_group, item->dst, item->src, item->bitfield);
 			item->bitfield = NULL; /* mark as no longer used */
 		}
 	}
@@ -230,7 +236,8 @@ static inline int state_enqueue(state_t *state, group_id destination_group,
 	return distance ? state_enqueue_delayed(state, destination_group,
 			destination_local_rank, source_rank, distance) :
 			state_enqueue_ready(state, destination_group,
-					destination_local_rank, GET_OLD_BITFIELD(state, source_rank));
+					destination_local_rank, source_rank,
+					GET_OLD_BITFIELD(state, source_rank));
 }
 
 /* generate a list of packets to be sent out to other peers (for MPI_Alltoallv) */
@@ -247,22 +254,24 @@ int state_generate_next_step(state_t *state, void **sendbuf,
 	char *start, *send_iterator = state->send.buf;
 
 	/* a message is composed of a local node id and the sent bitfield */
-	unsigned message_size = sizeof(node_id) + CTX_BITFIELD_SIZE(state);
+	unsigned message_size = 2 * sizeof(node_id) + CTX_BITFIELD_SIZE(state);
 
     /* switch step matrix before starting next iteration */
     memcpy(state->old_matrix, state->new_matrix, CTX_MATRIX_SIZE(state));
 
 	/* iterate over all process-iterators */
 	for (idx = 0; idx < state->local_node_count; idx++) {
-		destination = -2; /* set some default */
-
 		/* Get next the target rank of the next send */
 		ret_val = topology_iterator_next(&state->procs[idx], &destination, &distance);
 		if (ret_val != OK) {
-			return ret_val;
+			if (ret_val == DONE) {
+				state->active_count_down--;
+			} else {
+				return ret_val;
+			}
 		}
 
-		if (distance != NO_PACKET) {
+		if ((ret_val != DONE) && (distance != NO_PACKET)) {
 			/* update the statistics */
 			state->stats.messages_counter++;
 			state->stats.data_len_counter += POPCOUNT(state, idx);
@@ -291,10 +300,8 @@ int state_generate_next_step(state_t *state, void **sendbuf,
 	        PRINT(state, idx);
 	        if (distance != NO_PACKET) {
 		        printf(" - sends to #%lu", destination);
-	        } else if (destination == (node_id)-1) {
+	        } else if (ret_val == DONE) {
 		        printf(" - Done!");
-	        } else if (destination == (node_id)-2) {
-		        printf(" - Pass!");
 	        } else {
 		        printf(" - waits for #%lu", destination);
 	        }
@@ -352,6 +359,7 @@ int state_generate_next_step(state_t *state, void **sendbuf,
 		/* create a message from each source+destination pair */
 		for (jdx = 0; jdx < state->per_group[idx].used; jdx++) {
 			*((node_id*)send_iterator) = item->dst;
+			*((node_id*)send_iterator + 1) = item->src;
 			memcpy(((node_id*)send_iterator) + 1, item->bitfield,
 				   CTX_BITFIELD_SIZE(state));
 			send_iterator += message_size;
@@ -372,17 +380,44 @@ int state_generate_next_step(state_t *state, void **sendbuf,
 /* process a list of packets recieved from other peers (from MPI_Alltoallv) */
 int state_process_next_step(state_t *state, const char *incoming, unsigned length)
 {
+	int ret_val;
 	if (length) {
 		const char *limit = incoming + length;
-		unsigned message_size = sizeof(node_id) + CTX_BITFIELD_SIZE(state);
+		unsigned message_size = 2 * sizeof(node_id) + CTX_BITFIELD_SIZE(state);
 
 		/* Iterate over the incoming buffers */
 		for (; incoming < limit; incoming += message_size) {
-			MERGE(state, *((node_id*)incoming), ((node_id*)incoming) + 1);
+			node_id target = *((node_id*)incoming);
+			node_id sender = *(((node_id*)incoming) + 1);
+			char *bitfied = (char*)(((node_id*)incoming) + 2);
+			if (IS_LIVE(state, target)) {
+				if (IS_LIVE_HERE(bitfied)) {
+					/* live A sends to live B */
+					MERGE(state, target, bitfied);
+				} else {
+					/* dead A sends to live B - simulates timeout on B */
+					ret_val = topology_iterator_omit(&state->procs[target], sender);
+					if (ret_val != OK) {
+						return ret_val;
+					}
+				}
+			} else {
+				if (IS_LIVE_HERE(bitfied)) {
+					/* live A sends to dead B - send back a notification (simulates timeout) */
+					node_id destination = sender;
+					group_id destination_group = destination / state->local_node_count;
+					node_id destination_local_rank = destination % state->local_node_count;
+					ret_val = state_enqueue(state, destination_group,
+							destination_local_rank, target, state->death_timeout);
+					if (ret_val != OK) {
+						return ret_val;
+					}
+				} /* else: dead A sends to dead B - rare, if B died since his send */
+			}
 		}
 	}
 
-    return IS_ALL_FULL(state);
+	return state->active_count_down == 0;
 }
 
 int state_get_raw_stats(state_t *state, raw_stats_t *stats)

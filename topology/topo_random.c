@@ -42,7 +42,7 @@ int random_next(comm_graph_t *graph, struct random_ctx *ctx, node_id *target, un
 {
     unsigned next_target;
 	topology_spec_t *spec = ctx->spec;
-    unsigned cycle_len = spec->topology.random.cycle_random + spec->topology.random.cycle_const;
+    unsigned cycle_len = spec->topology.random.cycle;
 
     /* Select next target */
     switch (spec->topology_type)
@@ -53,16 +53,22 @@ int random_next(comm_graph_t *graph, struct random_ctx *ctx, node_id *target, un
         break;
 
     case COLLECTIVE_TOPOLOGY_RANDOM_FIXED_CONST: /* One const step for every <radix - 2> random steps */
-    case COLLECTIVE_TOPOLOGY_RANDOM_FIXED_RANDOM: /* One random step for every <radix - 1> const steps */
-    case COLLECTIVE_TOPOLOGY_RANDOM_VARIABLE_LINEAR: /* After every <radix> random steps - add one const step to the cycle */
-    case COLLECTIVE_TOPOLOGY_RANDOM_VARIABLE_EXPONENTIAL: /* After every <radix> random steps - double the non-random steps in the cycle */
-        if ((spec->step_index % cycle_len) < spec->topology.random.cycle_random) {
+        if (spec->step_index % cycle_len) {
         	next_target = CYCLIC_RANDOM(spec, spec->node_count);
         } else {
             /* Send to a node of increasing distance */
         	next_target = (ctx->my_rank + spec->step_index) % spec->node_count;
         }
         break;
+
+    case COLLECTIVE_TOPOLOGY_RANDOM_FIXED_RANDOM: /* One random step for every <radix - 1> const steps */
+        if (spec->step_index % cycle_len) {
+             /* Send to a node of increasing distance */
+         	next_target = (ctx->my_rank + spec->step_index) % spec->node_count;
+         } else {
+         	next_target = CYCLIC_RANDOM(spec, spec->node_count);
+         }
+         break;
 
     case COLLECTIVE_TOPOLOGY_RANDOM_HEURISTIC: /* Send to missing nodes from bit-field, the 1 radom for <radix> const steps */
         if ((IS_FULL_HERE(ctx->my_bitfield)) && (spec->step_index % cycle_len))
@@ -87,23 +93,6 @@ int random_next(comm_graph_t *graph, struct random_ctx *ctx, node_id *target, un
 
     default:
     	return ERROR;
-    }
-
-    /* Update step count, and cycle proportions for random hybrids */
-    if (cycle_len && (spec->step_index % cycle_len == 0)) {
-        switch (spec->topology_type)
-        {
-        case COLLECTIVE_TOPOLOGY_RANDOM_VARIABLE_LINEAR: /* After every <radix> random steps - add one const step to the cycle */
-            spec->topology.random.cycle_const++;
-            break;
-
-        case COLLECTIVE_TOPOLOGY_RANDOM_VARIABLE_EXPONENTIAL: /* After every <radix> random steps - double the non-random steps in the cycle */
-            spec->topology.random.cycle_const <<= 1;
-            break;
-
-        default:
-            break;
-        }
     }
 
     *target = next_target;

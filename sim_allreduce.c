@@ -150,7 +150,7 @@ int sim_test_iteration(sim_spec_t *spec, raw_stats_t *stats)
     }
     else
     {
-    	/* Run until everybody completes (unlimited) */
+    	/* Run until everybody completes (unlimited) */ // TODO: run until change to avg is < 0.1!!!
         while  (ret_val == OK)
         {
             ret_val = sim_test_iteration_step(spec);
@@ -259,7 +259,7 @@ int sim_test(sim_spec_t *spec)
     }
 
     if (orig_group_index == 0) {
-        printf("%i,%i,%i,%i,%i,%i,%.1f,%i",
+        printf("%i,%i,%i,%i,%i,%i,%.1f,%.1f,%.1f,%i",
                spec->node_total_count,
                spec->topology.model_type,
                spec->topology.topology_type,
@@ -270,6 +270,10 @@ int sim_test(sim_spec_t *spec)
 					   spec->topology.model.packet_delay_max : 0,
 			   (spec->topology.model_type == COLLECTIVE_MODEL_PACKET_DROP) ?
 					   spec->topology.model.packet_drop_rate : 0,
+			   (spec->topology.model_type == COLLECTIVE_MODEL_NODES_MISSING) ?
+					   spec->topology.model.node_fail_rate : 0,
+			   (spec->topology.model_type == COLLECTIVE_MODEL_NODES_FAILING) ?
+					   spec->topology.model.node_fail_rate : 0,
 			   aggregate ? spec->test_count : test_count);
         stats_print(&spec->steps);
         stats_print(&spec->msgs);
@@ -306,19 +310,11 @@ int sim_coll_tree_topology(sim_spec_t *spec)
 		 radix++) {
 		switch (spec->topology.topology_type) {
 		case COLLECTIVE_TOPOLOGY_RANDOM_FIXED_CONST: /* One const step for every <radix - 1> random steps */
-			spec->topology.topology.random.cycle_random = radix - 1;
-			spec->topology.topology.random.cycle_const = 1;
+			spec->topology.topology.random.cycle = radix - 1;
 			break;
 
 		case COLLECTIVE_TOPOLOGY_RANDOM_FIXED_RANDOM: /* One random step for every <radix> const steps */
-			spec->topology.topology.random.cycle_random = 1;
-			spec->topology.topology.random.cycle_const = radix;
-			break;
-
-		case COLLECTIVE_TOPOLOGY_RANDOM_VARIABLE_LINEAR: /* After every <radix> random steps - add one const step to the cycle */
-		case COLLECTIVE_TOPOLOGY_RANDOM_VARIABLE_EXPONENTIAL: /* After every <radix> random steps - double the non-random steps in the cycle */
-			spec->topology.topology.random.cycle_random = radix;
-			spec->topology.topology.random.cycle_const = 0;
+			spec->topology.topology.random.cycle = radix;
 			break;
 
 		default:
@@ -414,6 +410,42 @@ int sim_coll_model_time_offset(sim_spec_t *spec)
     return ret_val;
 }
 
+int sim_coll_model_nodes_missing(sim_spec_t *spec)
+{
+    int ret_val = OK;
+    float index;
+
+    if (spec->topology.model.node_fail_rate != 0) {
+        return sim_coll_topology(spec);
+    }
+
+    for (index = 0.1; ((index < 0.6) && (ret_val == OK)); index += 0.2) {
+    	spec->topology.model.node_fail_rate = index;
+        ret_val = sim_coll_topology(spec);
+    }
+
+    spec->topology.model.packet_drop_rate = 0;
+    return ret_val;
+}
+
+int sim_coll_model_nodes_failing(sim_spec_t *spec)
+{
+    int ret_val = OK;
+    float index;
+
+    if (spec->topology.model.node_fail_rate != 0) {
+        return sim_coll_topology(spec);
+    }
+
+    for (index = 0.1; ((index < 0.1) && (ret_val == OK)); index += 0.01) {
+    	spec->topology.model.node_fail_rate = index;
+        ret_val = sim_coll_topology(spec);
+    }
+
+    spec->topology.model.packet_drop_rate = 0;
+    return ret_val;
+}
+
 int sim_coll_model_vars(sim_spec_t *spec)
 {
     switch (spec->topology.model_type) {
@@ -428,6 +460,12 @@ int sim_coll_model_vars(sim_spec_t *spec)
 
     case COLLECTIVE_MODEL_TIME_OFFSET:
         return sim_coll_model_time_offset(spec);
+
+    case COLLECTIVE_MODEL_NODES_MISSING:
+    	return sim_coll_model_nodes_missing(spec);
+
+    case COLLECTIVE_MODEL_NODES_FAILING:
+    	return sim_coll_model_nodes_failing(spec);
 
     default:
         PERROR("Unknown Model!\n");

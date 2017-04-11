@@ -26,8 +26,6 @@ int topology_iterator_create(topology_spec_t *spec, topology_iterator_t *iterato
 	case COLLECTIVE_TOPOLOGY_RANDOM_PURE:
 	case COLLECTIVE_TOPOLOGY_RANDOM_FIXED_CONST:
 	case COLLECTIVE_TOPOLOGY_RANDOM_FIXED_RANDOM:
-	case COLLECTIVE_TOPOLOGY_RANDOM_VARIABLE_LINEAR:
-	case COLLECTIVE_TOPOLOGY_RANDOM_VARIABLE_EXPONENTIAL:
 	case COLLECTIVE_TOPOLOGY_RANDOM_HEURISTIC:
 		map_slot = RANDOM;
 		break;
@@ -56,6 +54,10 @@ int topology_iterator_create(topology_spec_t *spec, topology_iterator_t *iterato
 	iterator->random_seed = spec->topology.random.random_seed;
 	iterator->time_offset = (iterator->spec->model_type == COLLECTIVE_MODEL_TIME_OFFSET) ?
 			CYCLIC_RANDOM(iterator->spec, iterator->spec->model.time_offset_max) : 0;
+	if ((iterator->spec->model_type == COLLECTIVE_MODEL_NODES_MISSING) &&
+		(iterator->spec->model.node_fail_rate > FLOAT_RANDOM(iterator->spec))) {
+		SET_DEAD(iterator);
+	}
 	return iterator->funcs.start_f(spec, current_topology, &iterator->ctx);
 }
 
@@ -82,6 +84,19 @@ int topology_iterator_next(topology_iterator_t *iterator, node_id *target, unsig
 			return OK;
         }
         break;
+
+	case COLLECTIVE_MODEL_NODES_FAILING:
+		if (iterator->spec->model.node_fail_rate > FLOAT_RANDOM(iterator->spec)) {
+			SET_DEAD(iterator);
+		}
+		/* Intentionally no break */
+
+	case COLLECTIVE_MODEL_NODES_MISSING:
+		if (IS_DEAD(iterator)) {
+			*distance = NO_PACKET;
+			return OK;
+		}
+		break;
 
 	default:
 		break;

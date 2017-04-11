@@ -70,10 +70,8 @@ int tree_next(comm_graph_t *graph, struct tree_ctx *internal_ctx,
     	return OK;
     }
 
-    /* No more packets to send - draw blanks... */
-    *distance = NO_PACKET;
-    *target = -1;
-    return OK;
+    /* No more packets to send - we're done here! */
+    return DONE;
 }
 
 int tree_fix(comm_graph_t *graph, void *internal_ctx, node_id broken)

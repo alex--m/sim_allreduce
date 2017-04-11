@@ -22,18 +22,20 @@
     ((local_node) * CTX_BITFIELD_SIZE(ctx)))
 
 #define SET_OLD_BIT(ctx, local_node, node_bit) \
-    *(GET_OLD_BITFIELD(ctx, local_node) + ((node_bit + 1) >> 3)) |= \
-        (1 << ((node_bit + 1) & 7))
+    *(GET_OLD_BITFIELD(ctx, local_node) + ((node_bit + 2) >> 3)) |= \
+        (1 << ((node_bit + 2) & 7))
 
 #define SET_NEW_BIT(ctx, local_node, node_bit) \
-    *(GET_NEW_BITFIELD(ctx, local_node) + ((node_bit + 1) >> 3)) |= \
-        (1 << ((node_bit + 1) & 7))
+    *(GET_NEW_BITFIELD(ctx, local_node) + ((node_bit + 2) >> 3)) |= \
+        (1 << ((node_bit + 2) & 7))
 
 #define _IS_BIT_SET_HERE(node_bit, bitfield) \
-    ((*((bitfield) + (((node_bit) + 1) >> 3)) & \
-        (1 << (((node_bit) + 1) & 7))) != 0)
+    ((*((bitfield) + (((node_bit) + 2) >> 3)) & \
+        (1 << (((node_bit) + 2) & 7))) != 0)
 
-#define IS_FULL_HERE(bitfield) _IS_BIT_SET_HERE(-1, bitfield)
+#define IS_FULL_HERE(bitfield) _IS_BIT_SET_HERE(-2, bitfield)
+
+#define IS_LIVE_HERE(bitfield) _IS_BIT_SET_HERE(-1, bitfield)
 
 #define IS_BIT_SET_HERE(node_bit, bitfield) (IS_FULL_HERE(bitfield) || \
 	_IS_BIT_SET_HERE(node_bit, bitfield))
@@ -44,9 +46,13 @@
 #define IS_NEW_BIT_SET(ctx, local_node, node_bit) \
     IS_BIT_SET_HERE(node_bit, GET_NEW_BITFIELD(ctx, local_node))
 
-#define SET_FULL(ctx, local_node) SET_NEW_BIT(ctx, local_node, -1)
+#define SET_FULL(ctx, local_node) SET_NEW_BIT(ctx, local_node, -2)
 
-#define IS_FULL(ctx, local_node) IS_NEW_BIT_SET(ctx, local_node, -1)
+#define IS_FULL(ctx, local_node) IS_NEW_BIT_SET(ctx, local_node, -2)
+
+#define SET_LIVE(ctx, local_node) SET_NEW_BIT(ctx, local_node, -1)
+
+#define IS_LIVE(ctx, local_node) IS_NEW_BIT_SET(ctx, local_node, -1)
 
 #define IS_MINE_FULL(ctx) IS_FULL((ctx), ctx->my_rank)
 

@@ -20,8 +20,6 @@ typedef enum topology_type
     COLLECTIVE_TOPOLOGY_RANDOM_PURE,
     COLLECTIVE_TOPOLOGY_RANDOM_FIXED_CONST, /* One const step for every <radix - 2> random steps */
     COLLECTIVE_TOPOLOGY_RANDOM_FIXED_RANDOM, /* One random step for every <radix - 1> const steps */
-    COLLECTIVE_TOPOLOGY_RANDOM_VARIABLE_LINEAR, /* After every <radix> steps - add one const step to the cycle */
-    COLLECTIVE_TOPOLOGY_RANDOM_VARIABLE_EXPONENTIAL, /* After every <radix> steps - double the non-random steps in the cycle */
     COLLECTIVE_TOPOLOGY_RANDOM_HEURISTIC, /* Send to missing nodes from bitfield, the 50:50 random hybrid*/
 
     COLLECTIVE_TOPOLOGY_ALL /* default, must be last */
@@ -33,8 +31,8 @@ typedef enum model_type
     COLLECTIVE_MODEL_PACKET_DELAY,  /* Random packet delay */
     COLLECTIVE_MODEL_PACKET_DROP,   /* Random failure at times */
     COLLECTIVE_MODEL_TIME_OFFSET,   /* Random start time offset */
-	// TODO: COLLECTIVE_MODEL_NODE_FAILURE,  /* Node stops functioning */
-
+	COLLECTIVE_MODEL_NODES_MISSING, /* Random nodes do not take part */
+	COLLECTIVE_MODEL_NODES_FAILING, /* Radmon nodes fail online */
     COLLECTIVE_MODEL_ALL /* default, must be last */
 } model_type_t;
 
@@ -57,14 +55,14 @@ typedef struct topology_spec
 		    unsigned radix;
 		} butterfly;
 		struct {
-			unsigned cycle_random;
-			unsigned cycle_const;
+			unsigned cycle;
 			unsigned random_seed;
 		} random;
 	} topology;
 
 	model_type_t model_type;
 	union {
+		float node_fail_rate;
 		float packet_drop_rate;
 		unsigned time_offset_max;
 		unsigned packet_delay_max;
@@ -94,11 +92,14 @@ typedef struct topology_iterator {
 	topo_funcs_t funcs;
 	unsigned time_offset;
 	unsigned random_seed;
+	unsigned time_finished;
 } topology_iterator_t;
 
 int topology_iterator_create(topology_spec_t *spec, topology_iterator_t *iterator);
 
 #define NO_PACKET ((unsigned)-1) /* set as distance */
+#define IS_DEAD(iterator) (iterator->time_offset == -1)
+#define SET_DEAD(iterator) ({ iterator->time_offset = -1; })
 
 int topology_iterator_next(topology_iterator_t *iterator, node_id *target, unsigned *distance);
 

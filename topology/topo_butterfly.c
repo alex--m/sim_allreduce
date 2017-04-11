@@ -50,9 +50,7 @@ int butterfly_next(comm_graph_t *graph, struct butterfly_ctx *internal_ctx,
 
     /* Check for remaining peers */
     if (internal_ctx->next_child_index >= internal_ctx->my_peers->node_count) {
-    	*target = -1;
-        *distance = NO_PACKET;
-        return OK;
+        return DONE;
     }
 
     /* Wait for excess nodes */
