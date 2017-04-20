@@ -417,7 +417,7 @@ int state_process_next_step(state_t *state, const char *incoming, unsigned lengt
 		}
 	}
 
-	return state->active_count_down == 0;
+	return state->active_count_down == 0; // TODO: coordinate this so all procs stop at once
 }
 
 int state_get_raw_stats(state_t *state, raw_stats_t *stats)

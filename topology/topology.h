@@ -1,8 +1,8 @@
 #include "comm_graph.h"
 
 #ifdef __linux__
-#define CYCLIC_RANDOM(spec, mod) (rand_r(&(spec)->topology.random.random_seed) % (mod))
-#define FLOAT_RANDOM(spec) ((rand_r(&(spec)->topology.random.random_seed)) / ((float)RAND_MAX))
+#define CYCLIC_RANDOM(spec, mod) (rand_r(&(spec)->random_seed) % (mod))
+#define FLOAT_RANDOM(spec) ((rand_r(&(spec)->random_seed)) / ((float)RAND_MAX))
 #elif _WIN32
 #define CYCLIC_RANDOM(spec, mod) (rand() % (mod))
 #define FLOAT_RANDOM(spec) (((float)rand()) / RAND_MAX)
@@ -17,10 +17,6 @@ typedef enum topology_type
     COLLECTIVE_TOPOLOGY_NARRAY_MULTIROOT_TREE,
     COLLECTIVE_TOPOLOGY_KNOMIAL_MULTIROOT_TREE,
     COLLECTIVE_TOPOLOGY_RECURSIVE_K_ING,
-    COLLECTIVE_TOPOLOGY_RANDOM_PURE,
-    COLLECTIVE_TOPOLOGY_RANDOM_FIXED_CONST, /* One const step for every <radix - 2> random steps */
-    COLLECTIVE_TOPOLOGY_RANDOM_FIXED_RANDOM, /* One random step for every <radix - 1> const steps */
-    COLLECTIVE_TOPOLOGY_RANDOM_HEURISTIC, /* Send to missing nodes from bitfield, the 50:50 random hybrid*/
 
     COLLECTIVE_TOPOLOGY_ALL /* default, must be last */
 } topology_type_t;
@@ -36,6 +32,14 @@ typedef enum model_type
     COLLECTIVE_MODEL_ALL /* default, must be last */
 } model_type_t;
 
+typedef enum tree_recovery_type
+{
+    COLLECTIVE_RECOVERY_FATHER_FIRST = 0,
+    COLLECTIVE_RECOVERY_BROTHER_FIRST,
+
+    COLLECTIVE_RECOVERY_ALL /* default, must be last */
+} tree_recovery_type_t;
+
 typedef struct topology_spec
 {
 	int verbose;
@@ -43,21 +47,18 @@ typedef struct topology_spec
 	node_id node_count;
 	node_id local_node_count;
 	unsigned char *my_bitfield;
-
+	unsigned random_seed;
 	unsigned step_index; /* struct abuse in favor of optimization */
 
 	topology_type_t topology_type;
 	union {
 		struct {
 		    unsigned radix;
+		    tree_recovery_type_t recovery;
 		} tree;
 		struct {
 		    unsigned radix;
 		} butterfly;
-		struct {
-			unsigned cycle;
-			unsigned random_seed;
-		} random;
 	} topology;
 
 	model_type_t model_type;
@@ -73,7 +74,6 @@ enum topology_map_slot
 {
 	TREE,
 	BUTTERFLY,
-	RANDOM
 };
 
 typedef struct topo_funcs

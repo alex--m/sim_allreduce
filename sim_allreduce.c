@@ -193,8 +193,7 @@ int sim_test(sim_spec_t *spec)
     }
 
     /* no need to collect statistics on deterministic algorithms */
-    if ((spec->topology.topology_type < COLLECTIVE_TOPOLOGY_RANDOM_PURE) &&
-        (spec->topology.model_type == COLLECTIVE_MODEL_ITERATIVE)) {
+    if (spec->topology.model_type == COLLECTIVE_MODEL_ITERATIVE) {
             test_count = 1;
             aggregate = 0;
     }
@@ -296,7 +295,27 @@ int sim_test(sim_spec_t *spec)
  *                                                                           *
 \*****************************************************************************/
 
-int sim_coll_tree_topology(sim_spec_t *spec)
+int sim_coll_tree_recovery(sim_spec_t *spec)
+{
+    int ret_val = OK;
+    tree_recovery_type_t index;
+
+    if (spec->topology.topology.tree.recovery != COLLECTIVE_RECOVERY_ALL) {
+        return sim_test(spec);
+    }
+
+	for (index = 0;
+		 ((index < COLLECTIVE_RECOVERY_ALL) && (ret_val == OK));
+		 index++) {
+		spec->topology.topology.tree.recovery = index;
+		ret_val = sim_test(spec);
+	}
+
+	spec->topology.topology.tree.recovery = COLLECTIVE_RECOVERY_ALL;
+    return ret_val;
+}
+
+int sim_coll_radix_topology(sim_spec_t *spec)
 {
     int ret_val = OK;
     unsigned radix;
@@ -308,23 +327,20 @@ int sim_coll_tree_topology(sim_spec_t *spec)
 	for (radix = 2;
 		 ((radix < 10) && (radix <= spec->node_total_count) && (ret_val == OK));
 		 radix++) {
-		switch (spec->topology.topology_type) {
-		case COLLECTIVE_TOPOLOGY_RANDOM_FIXED_CONST: /* One const step for every <radix - 1> random steps */
-			spec->topology.topology.random.cycle = radix - 1;
-			break;
-
-		case COLLECTIVE_TOPOLOGY_RANDOM_FIXED_RANDOM: /* One random step for every <radix> const steps */
-			spec->topology.topology.random.cycle = radix;
-			break;
-
-		default:
+		if (spec->topology.topology_type < COLLECTIVE_TOPOLOGY_RECURSIVE_K_ING) {
 			spec->topology.topology.tree.radix = radix;
-			break;
+			ret_val = sim_coll_tree_recovery(spec);
+		} else {
+			spec->topology.topology.butterfly.radix = radix;
+			ret_val = sim_test(spec);
 		}
-		ret_val = sim_test(spec);
 	}
 
-    spec->topology.topology.tree.radix = 0;
+	if (spec->topology.topology_type < COLLECTIVE_TOPOLOGY_RECURSIVE_K_ING) {
+		spec->topology.topology.tree.radix = 0;
+	} else {
+		spec->topology.topology.butterfly.radix = 0;
+	}
     return ret_val;
 }
 
@@ -334,16 +350,14 @@ int sim_coll_topology(sim_spec_t *spec)
     topology_type_t index;
 
     if (spec->topology.topology_type < COLLECTIVE_TOPOLOGY_ALL) {
-        return (spec->topology.topology_type != COLLECTIVE_TOPOLOGY_RANDOM_PURE) ?
-                sim_coll_tree_topology(spec) : sim_test(spec);
+        return sim_coll_radix_topology(spec);
     }
 
     for (index = 0;
          ((index < COLLECTIVE_TOPOLOGY_ALL) && (ret_val == OK));
          index++) {
         spec->topology.topology_type = index;
-        ret_val = (spec->topology.topology_type != COLLECTIVE_TOPOLOGY_RANDOM_PURE) ?
-                sim_coll_tree_topology(spec) : sim_test(spec);
+        ret_val = sim_coll_radix_topology(spec);
     }
 
     spec->topology.topology_type = COLLECTIVE_TOPOLOGY_ALL;
@@ -520,6 +534,10 @@ const char HELP_STRING[] =
         "    -p|--procs <proc-count> - Set Amount of processes to simulate (default: 20)\n"
         "    -r|--radix <tree-radix> - Set tree radix for tree-based topologies "
         "(default: iterate from 3 to 10)\n\n"
+		"    -c|--recovery <recovery-method> - Set the method for tree fault recovery:"
+        "        0 - Fall back to fathers, up the tree\n"
+        "        1 - Fall back to brothers, across the tree\n"
+        "        2 - All of the above (default)\n\n"
         "    -f|--fail-rate <percentage> - Set failure percentage for packet drop "
         "model (default: iterate from 0.1 to 0.6 in incements of 0.2)\n\n"
         "    -d|--distance-max <iterations> - Set maximum distance for Non-uniform "
@@ -539,6 +557,7 @@ int sim_coll_parse_args(int argc, char **argv, sim_spec_t *spec)
                 {"topology",       required_argument, 0, 't' },
                 {"procs",          required_argument, 0, 'p' },
                 {"radix",          required_argument, 0, 'r' },
+				{"recovery",       required_argument, 0, 'c' },
                 {"fail-rate",      required_argument, 0, 'f' },
                 {"distance-max",   required_argument, 0, 'd' },
                 {"offset-max",     required_argument, 0, 'o' },
@@ -635,7 +654,7 @@ int main(int argc, char **argv)
 
     /* Set the defaults */
     sim_spec_t spec = {0};
-    spec.topology.verbose = 0;
+    spec.topology.verbose = 1;
     spec.topology.model_type = COLLECTIVE_MODEL_ALL;
     spec.topology.topology_type = COLLECTIVE_TOPOLOGY_ALL;
     spec.test_count = DEFAULT_TEST_COUNT;
@@ -652,7 +671,7 @@ int main(int argc, char **argv)
         goto finalize;
     }
 
-    spec.topology.topology.random.random_seed += spec.node_group_index;
+    spec.topology.random_seed += spec.node_group_index;
     if (sim_coll_parse_args(argc, argv, &spec))
     {
         return ERROR;
@@ -680,7 +699,7 @@ int main(int argc, char **argv)
                 spec.topology.model_type, spec.topology.topology_type,
                 spec.step_count, spec.test_count,
                 spec.topology.topology.tree.radix,
-                spec.topology.topology.random.random_seed,
+                spec.topology.random_seed,
                 spec.node_group_index, spec.node_group_count,
                 spec.node_group_count);
 

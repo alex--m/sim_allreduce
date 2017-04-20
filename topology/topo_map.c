@@ -12,12 +12,6 @@ int butterfly_next(comm_graph_t *graph, void *internal_ctx, node_id *target, uns
 int butterfly_fix(comm_graph_t *graph, void *internal_ctx, node_id broken);
 int butterfly_end(void *internal_ctx);
 
-int random_build(topology_spec_t *spec, comm_graph_t **graph);
-int random_start(topology_spec_t *spec, comm_graph_t *graph, void **internal_ctx);
-int random_next(comm_graph_t *graph, void *internal_ctx, node_id *target, unsigned *distance);
-int random_fix(comm_graph_t *graph, void *internal_ctx, node_id broken);
-int random_end(void *internal_ctx);
-
 topo_funcs_t topo_map[] = {
 		{
 				.build_f = tree_build,
@@ -32,12 +26,5 @@ topo_funcs_t topo_map[] = {
 				.next_f = butterfly_next,
 				.fix_f = butterfly_fix,
 				.end_f = butterfly_end,
-		},
-		{
-				.build_f = random_build,
-				.start_f = random_start,
-				.next_f = random_next,
-				.fix_f = random_fix,
-				.end_f = random_end,
 		},
 };

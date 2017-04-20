@@ -23,13 +23,6 @@ int topology_iterator_create(topology_spec_t *spec, topology_iterator_t *iterato
 		map_slot = BUTTERFLY;
 		break;
 
-	case COLLECTIVE_TOPOLOGY_RANDOM_PURE:
-	case COLLECTIVE_TOPOLOGY_RANDOM_FIXED_CONST:
-	case COLLECTIVE_TOPOLOGY_RANDOM_FIXED_RANDOM:
-	case COLLECTIVE_TOPOLOGY_RANDOM_HEURISTIC:
-		map_slot = RANDOM;
-		break;
-
 	case COLLECTIVE_TOPOLOGY_ALL:
 		return ERROR;
 	}
@@ -51,7 +44,7 @@ int topology_iterator_create(topology_spec_t *spec, topology_iterator_t *iterato
 
 	iterator->spec = spec;
 	iterator->graph = current_topology;
-	iterator->random_seed = spec->topology.random.random_seed;
+	iterator->random_seed = spec->random_seed;
 	iterator->time_offset = (iterator->spec->model_type == COLLECTIVE_MODEL_TIME_OFFSET) ?
 			CYCLIC_RANDOM(iterator->spec, iterator->spec->model.time_offset_max) : 0;
 	if ((iterator->spec->model_type == COLLECTIVE_MODEL_NODES_MISSING) &&
