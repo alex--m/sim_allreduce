@@ -150,11 +150,13 @@ int sim_test_iteration(sim_spec_t *spec, raw_stats_t *stats)
     }
     else
     {
-    	/* Run until everybody completes (unlimited) */ // TODO: run until change to avg is < 0.1!!!
+    	/* Run until everybody completes (unlimited) */
         while  (ret_val == OK)
         {
             ret_val = sim_test_iteration_step(spec);
             spec->topology.step_index++;
+
+            if (spec->topology.step_index > 10) return ERROR;// TODO: remove!
         }
     }
 
@@ -277,6 +279,9 @@ int sim_test(sim_spec_t *spec)
         stats_print(&spec->steps);
         stats_print(&spec->msgs);
         stats_print(&spec->data);
+        if (ret_val != OK) {
+        	printf(" - ERROR!");
+        }
         printf("\n");
     }
 
@@ -654,7 +659,7 @@ int main(int argc, char **argv)
 
     /* Set the defaults */
     sim_spec_t spec = {0};
-    spec.topology.verbose = 1;
+    spec.topology.verbose = 0;
     spec.topology.model_type = COLLECTIVE_MODEL_ALL;
     spec.topology.topology_type = COLLECTIVE_TOPOLOGY_ALL;
     spec.test_count = DEFAULT_TEST_COUNT;

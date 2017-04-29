@@ -65,6 +65,7 @@ int topology_iterator_next(topology_iterator_t *iterator, node_id *target, unsig
 
 	case COLLECTIVE_MODEL_PACKET_DROP:
 		if (iterator->spec->model.packet_drop_rate > FLOAT_RANDOM(iterator->spec)) {
+			printf("\nPacket DROPPED!\n");
 			*distance = NO_PACKET;
 			return OK;
 		}
@@ -98,13 +99,13 @@ int topology_iterator_next(topology_iterator_t *iterator, node_id *target, unsig
 	return iterator->funcs.next_f(iterator->graph, iterator->ctx, target, distance);
 }
 
-int topology_iterator_omit(topology_iterator_t *iterator, node_id broken)
+int topology_iterator_omit(topology_iterator_t *iterator, tree_recovery_type_t method, node_id broken)
 {
 	if (iterator->graph && (iterator->graph == current_topology)) {
 		iterator->graph = comm_graph_clone(current_topology);
 	}
 
-	return iterator->funcs.fix_f(iterator->graph, iterator->ctx, broken);
+	return iterator->funcs.fix_f(iterator->graph, iterator->ctx, method, broken);
 }
 
 void topology_iterator_destroy(topology_iterator_t *iterator)

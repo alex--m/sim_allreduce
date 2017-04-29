@@ -36,7 +36,7 @@ int butterfly_start(topology_spec_t *spec, comm_graph_t *graph,
     (*internal_ctx)->next_child_index = 0;
     (*internal_ctx)->my_bitfield = spec->my_bitfield;
     (*internal_ctx)->node_count = spec->node_count;
-    (*internal_ctx)->my_peers = graph->nodes[spec->my_rank].directions[0];
+    (*internal_ctx)->my_peers = graph->nodes[spec->my_rank].directions[COMM_GRAPH_CHILDREN];
     (*internal_ctx)->first_extra = ((spec->node_count != power) &&
     		(spec->my_rank < power)) ? (spec->my_rank + power) : 0;
     (*internal_ctx)->power = power;
@@ -120,7 +120,7 @@ int butterfly_build(topology_spec_t *spec, comm_graph_t **graph)
     node_id next_id;
     node_id jump;
 
-    *graph = comm_graph_create(node_count, COMM_GRAPH_FLOW);
+    *graph = comm_graph_create(node_count, 0);
     if (!*graph) {
         return ERROR;
     }
@@ -128,7 +128,8 @@ int butterfly_build(topology_spec_t *spec, comm_graph_t **graph)
     /* Set excess nodes (non power of radix) to check in */
     max_group_size = get_closest_power(node_count, radix);
     for (next_id = max_group_size; next_id < node_count; next_id++) {
-    	comm_graph_append(*graph, next_id, next_id % max_group_size);
+    	comm_graph_append(*graph, next_id, next_id % max_group_size,
+    			COMM_GRAPH_CHILDREN);
     }
 
     for (jump_size = 1, group_size = radix;
@@ -137,16 +138,18 @@ int butterfly_build(topology_spec_t *spec, comm_graph_t **graph)
         for (next_id = 0; next_id < max_group_size; next_id++) {
             for (jump = 1; jump < radix; jump++) {
                 node_id group_start = next_id - (next_id % group_size);
-                comm_graph_append(*graph, next_id, group_start
-                		+ (((next_id - group_start)
-                				+ (jump_size * jump)) % group_size));
+                comm_graph_append(*graph, next_id, group_start +
+                		          (((next_id - group_start) +
+                				  (jump_size * jump)) % group_size),
+								  COMM_GRAPH_CHILDREN);
             }
         }
     }
 
     /* Provide excess nodes (non power of radix) with the result */
     for (next_id = max_group_size; next_id < node_count; next_id++) {
-    	comm_graph_append(*graph, next_id % max_group_size, next_id);
+    	comm_graph_append(*graph, next_id % max_group_size, next_id,
+    			COMM_GRAPH_CHILDREN);
     }
 
     return OK;

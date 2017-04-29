@@ -2,10 +2,10 @@
 
 #ifdef __linux__
 #define CYCLIC_RANDOM(spec, mod) (rand_r(&(spec)->random_seed) % (mod))
-#define FLOAT_RANDOM(spec) ((rand_r(&(spec)->random_seed)) / ((float)RAND_MAX))
+#define FLOAT_RANDOM(spec) (((float)rand_r(&(spec)->random_seed)) / ((float)RAND_MAX))
 #elif _WIN32
 #define CYCLIC_RANDOM(spec, mod) (rand() % (mod))
-#define FLOAT_RANDOM(spec) (((float)rand()) / RAND_MAX)
+#define FLOAT_RANDOM(spec) (((float)rand()) / (float)RAND_MAX)
 #else
 #error "OS not supported!"
 #endif
@@ -81,7 +81,7 @@ typedef struct topo_funcs
 	int (*build_f)(topology_spec_t *spec, comm_graph_t **graph);
 	int (*start_f)(topology_spec_t *spec, comm_graph_t *graph, void **internal_ctx);
 	int (*next_f)(comm_graph_t *graph, void *internal_ctx, node_id *target, unsigned *distance);
-	int (*fix_f)(comm_graph_t *graph, void *internal_ctx, node_id broken);
+	int (*fix_f)(comm_graph_t *graph, void *internal_ctx, tree_recovery_type_t method, node_id broken);
 	int (*end_f)(void *internal_ctx);
 } topo_funcs_t;
 
@@ -99,11 +99,11 @@ int topology_iterator_create(topology_spec_t *spec, topology_iterator_t *iterato
 
 #define NO_PACKET ((unsigned)-1) /* set as distance */
 #define IS_DEAD(iterator) (iterator->time_offset == -1)
-#define SET_DEAD(iterator) ({ iterator->time_offset = -1; })
+#define SET_DEAD(iterator) ({ iterator->time_offset = -1; printf("\n\npronounced DEAD! \n\n"); })
 
 int topology_iterator_next(topology_iterator_t *iterator, node_id *target, unsigned *distance);
 
-int topology_iterator_omit(topology_iterator_t *iterator, node_id broken);
+int topology_iterator_omit(topology_iterator_t *iterator, tree_recovery_type_t method, node_id broken);
 
 void topology_iterator_destroy(topology_iterator_t *iterator);
 

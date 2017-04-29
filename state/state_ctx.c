@@ -45,6 +45,7 @@ typedef struct state
 
 	int verbose;
     unsigned death_timeout;     /* Steps it takes to "give up" and mark a node dead */
+    tree_recovery_type_t recovery; /* Dead node recovery method */
 	raw_stats_t stats;
 } state_t;
 
@@ -128,6 +129,7 @@ int state_create(topology_spec_t *spec, state_t *old_state, state_t **new_state)
 	}
 
 	ctx->active_count_down = spec->local_node_count;
+	ctx->recovery = spec->topology.tree.recovery;
 	*new_state = ctx;
 	return OK;
 }
@@ -396,7 +398,7 @@ int state_process_next_step(state_t *state, const char *incoming, unsigned lengt
 					MERGE(state, target, bitfied);
 				} else {
 					/* dead A sends to live B - simulates timeout on B */
-					ret_val = topology_iterator_omit(&state->procs[target], sender);
+					ret_val = topology_iterator_omit(&state->procs[target], state->recovery, sender);
 					if (ret_val != OK) {
 						return ret_val;
 					}

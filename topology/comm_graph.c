@@ -15,8 +15,7 @@
 	node->directions[direction]->nodes[node->directions[direction]->node_count++] = node_id; \
 }\
 
-comm_graph_t* comm_graph_create(node_id node_count,
-		enum comm_graph_direction_count direction_count)
+comm_graph_t* comm_graph_create(node_id node_count, int is_bidirectional)
 {
 	comm_graph_node_t *new_node;
 	unsigned node_index, direction_index;
@@ -30,10 +29,8 @@ comm_graph_t* comm_graph_create(node_id node_count,
 	for (node_index = 0, new_node = res->nodes;
 		 node_index < node_count;
 		 node_index++, new_node++) {
-		new_node->direction_count = direction_count;
-
 		for (direction_index = 0;
-			 direction_index < direction_count;
+			 direction_index < COMM_GRAPH_MAX_DIMENTIONS;
 			 direction_index++) {
 			new_node->directions[direction_index] = malloc(sizeof(comm_graph_direction_t));
 			if (!new_node->directions[direction_index]) {
@@ -45,8 +42,8 @@ comm_graph_t* comm_graph_create(node_id node_count,
 		}
 	}
 
+	res->is_bidirectional = is_bidirectional;
 	res->node_count = node_count;
-	res->direction_count = direction_count;
 	return res;
 }
 
@@ -56,7 +53,7 @@ comm_graph_t* comm_graph_clone(comm_graph_t* original)
 	unsigned node_index, direction_index;
 
 	comm_graph_t *res = comm_graph_create(original->node_count,
-			original->direction_count);
+			original->is_bidirectional);
 	if (!res) {
 		return NULL;
 	}
@@ -64,10 +61,8 @@ comm_graph_t* comm_graph_clone(comm_graph_t* original)
 	for (node_index = 0, new_node = res->nodes, node = original->nodes;
 		 node_index < original->node_count;
 		 node_index++, new_node++, node++) {
-		new_node->direction_count = node->direction_count;
-
 		for (direction_index = 0;
-			 direction_index < node->direction_count;
+			 direction_index < COMM_GRAPH_MAX_DIMENTIONS;
 			 direction_index++) {
 			comm_graph_direction_t *direction, *new_direction;
 			direction = node->directions[direction_index];
@@ -99,7 +94,7 @@ void comm_graph_destroy(comm_graph_t* comm_graph)
 		 node_index++, node++) {
 
 		for (direction_index = 0;
-			 direction_index < node->direction_count;
+			 direction_index < COMM_GRAPH_MAX_DIMENTIONS;
 			 direction_index++) {
 			comm_graph_direction_t *direction =
 				node->directions[direction_index];
@@ -112,16 +107,40 @@ void comm_graph_destroy(comm_graph_t* comm_graph)
 	free(comm_graph);
 }
 
-int comm_graph_append(comm_graph_t* comm_graph, node_id father, node_id child)
+int comm_graph_append(comm_graph_t* comm_graph, node_id src, node_id dst,
+		enum comm_graph_direction_type direction)
 {
-	comm_graph_node_t *node = &comm_graph->nodes[father];
-	assert(father < comm_graph->node_count);
-	assert(child < comm_graph->node_count);
-	COMM_GRAPH_DIRECTION_APPEND(node, 0, child);
+	comm_graph_node_t *node = &comm_graph->nodes[src];
+	assert(src < comm_graph->node_count);
+	assert(src < comm_graph->node_count);
+	COMM_GRAPH_DIRECTION_APPEND(node, direction, dst);
 
-	if (comm_graph->direction_count == COMM_GRAPH_BIDI) {
-		node = &comm_graph->nodes[child];
-		COMM_GRAPH_DIRECTION_APPEND(node, 1, father);
+	if (comm_graph->is_bidirectional) {
+		node = &comm_graph->nodes[dst];
+		COMM_GRAPH_DIRECTION_APPEND(node, 1-direction, src);
+	}
+
+	return OK;
+}
+
+int comm_graph_count(comm_graph_t* comm_graph, node_id id,
+		enum comm_graph_direction_type direction)
+{
+	return comm_graph->nodes[id].directions[direction]->node_count;
+}
+
+int comm_graph_copy(comm_graph_t* comm_graph, node_id src, node_id dst,
+		enum comm_graph_direction_type src_direction,
+		enum comm_graph_direction_type dst_direction)
+{
+
+	unsigned index;
+	comm_graph_node_t *dst_node = &comm_graph->nodes[dst];
+	comm_graph_direction_ptr_t source =
+			comm_graph->nodes[src].directions[src_direction];
+
+	for (index = 0; index < source->node_count; index++) {
+		COMM_GRAPH_DIRECTION_APPEND(dst_node, dst_direction, source->nodes[index]);
 	}
 
 	return OK;

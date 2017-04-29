@@ -84,10 +84,18 @@
 	if (IS_FULL_HERE(addition)) {                                             \
 		SET_FULL(ctx, local_node);                                            \
 	} else if (!IS_FULL(ctx, local_node)) {                                   \
-		unsigned i, added, in_cnt = 0, out_cnt = 0;                           \
+		unsigned i, added, in_cnt, out_cnt, mask = (unsigned)-1;              \
 		unsigned *present = (unsigned*)GET_NEW_BITFIELD(ctx, local_node);     \
 		unsigned max = CTX_BITFIELD_SIZE(ctx) / sizeof(unsigned);             \
-		for (i = 0; i < max; i++)                                             \
+		                                                                      \
+		/* special treatment for first bits */                                \
+		added = *((unsigned*)addition);                                       \
+		*present |= added;                                                    \
+		((char*)&mask)[0] ^= 3; /* mask out full/live bits */                 \
+		out_cnt = __builtin_popcount(*present & mask);                        \
+		in_cnt = __builtin_popcount(added & mask);                            \
+	                                                                          \
+		for (i = 1; i < max; i++)                                             \
 		{                                                                     \
 			added = *((unsigned*)(addition) + i);                             \
 			*(present + i) |= added;                                          \
@@ -95,7 +103,7 @@
 			in_cnt += __builtin_popcount(added);                              \
 		}                                                                     \
 		/*ctx->spec->messages_counter++;*/                                        \
-		/*ctx->spec->data_len_counter += popcnt;*/                                \
+		/*ctx->spec->data_len_counter += in_cnt;*/                                \
 		if (out_cnt == ctx->global_node_count) SET_FULL(ctx, local_node);     \
     }                                                                         \
 })
@@ -105,14 +113,9 @@
 
 #define PRINT(ctx, local_node) ({                                             \
     int i;                                                                    \
-    if (IS_FULL((ctx), local_node)) {                                         \
-		for (i = 0; i < (ctx)->local_node_count; i++) {                       \
-			printf("1");                                                      \
-		}                                                                     \
-    } else {                                                                  \
-		for (i = 0; i < (ctx)->local_node_count; i++) {                       \
-			printf("%i", IS_NEW_BIT_SET((ctx), local_node, i));               \
-		}                                                                     \
+	for (i = 0; i < (ctx)->local_node_count; i++) {                           \
+		printf("%i", IS_NEW_BIT_SET((ctx), local_node, i));                   \
 	}                                                                         \
     printf(" (is_full=%i)", IS_FULL((ctx), local_node));                      \
+    printf(" (is_live=%i)", IS_LIVE((ctx), local_node));                      \
 })
