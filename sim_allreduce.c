@@ -35,12 +35,6 @@ typedef struct sim_spec
  *                                                                           *
 \*****************************************************************************/
 
-enum split_mode {
-	NO_SPLIT = 0,
-	SPLIT_ITERATIONS, /* every node does a portion of the iterations */
-	SPLIT_PROCS, /* every node simulates a portion of procs in each iteration */
-};
-
 int sim_test_iteration(sim_spec_t *spec, raw_stats_t *stats)
 {
     int ret_val = OK;

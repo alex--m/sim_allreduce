@@ -176,6 +176,7 @@ static inline int state_send_message(state_t *state, node_id destination_rank,
 	if (IS_LIVE(state, destination_rank)) {
 		if (IS_LIVE_HERE(bitfield)) {
 			/* live A sends to live B */
+			printf("merging %i into %i!\n", source_rank, destination_rank);
 			MERGE(state, destination_rank, bitfield);
 		} else {
 			/* dead A sends to live B - simulates timeout on B */
