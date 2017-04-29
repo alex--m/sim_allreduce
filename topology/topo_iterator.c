@@ -5,6 +5,19 @@ comm_graph_t *current_topology = NULL;
 unsigned current_reference_count = 0;
 extern topo_funcs_t topo_map[];
 
+size_t topology_iterator_size()
+{
+	size_t max = 0;
+	enum topology_map_slot map_slot = 0;
+	while (map_slot < MAX) {
+		size_t slot_size = topo_map[map_slot++].size_f();
+		if (max < slot_size) {
+			max = slot_size;
+		}
+	}
+	return max + sizeof(topology_iterator_t);
+}
+
 int topology_iterator_create(topology_spec_t *spec, topology_iterator_t *iterator)
 {
 	int ret_val;
@@ -51,7 +64,7 @@ int topology_iterator_create(topology_spec_t *spec, topology_iterator_t *iterato
 		(iterator->spec->model.node_fail_rate > FLOAT_RANDOM(iterator->spec))) {
 		SET_DEAD(iterator);
 	}
-	return iterator->funcs.start_f(spec, current_topology, &iterator->ctx);
+	return iterator->funcs.start_f(spec, current_topology, &iterator->ctx[0]);
 }
 
 int topology_iterator_next(topology_iterator_t *iterator, node_id *target, unsigned *distance)
@@ -110,8 +123,6 @@ int topology_iterator_omit(topology_iterator_t *iterator, tree_recovery_type_t m
 
 void topology_iterator_destroy(topology_iterator_t *iterator)
 {
-	iterator->funcs.end_f(iterator->ctx);
-
 	if (iterator->graph && (iterator->graph != current_topology)) {
 		comm_graph_destroy(iterator->graph);
 	}

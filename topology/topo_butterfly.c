@@ -21,25 +21,24 @@ static inline unsigned get_closest_power(node_id node_count, unsigned radix)
 	return power;
 }
 
+size_t butterfly_ctx_size() {
+	return sizeof(struct butterfly_ctx);
+}
+
 int butterfly_start(topology_spec_t *spec, comm_graph_t *graph,
-                    struct butterfly_ctx **internal_ctx)
+                    struct butterfly_ctx *internal_ctx)
 {
     unsigned radix = spec->topology.butterfly.radix;
 	unsigned power = get_closest_power(spec->node_count, radix);
 
-    *internal_ctx = malloc(sizeof(struct butterfly_ctx));
-    if (!*internal_ctx) {
-        return ERROR;
-    }
-
-    (*internal_ctx)->check_interval = radix - 1;
-    (*internal_ctx)->next_child_index = 0;
-    (*internal_ctx)->my_bitfield = spec->my_bitfield;
-    (*internal_ctx)->node_count = spec->node_count;
-    (*internal_ctx)->my_peers = graph->nodes[spec->my_rank].directions[COMM_GRAPH_CHILDREN];
-    (*internal_ctx)->first_extra = ((spec->node_count != power) &&
+    internal_ctx->check_interval = radix - 1;
+    internal_ctx->next_child_index = 0;
+    internal_ctx->my_bitfield = spec->my_bitfield;
+    internal_ctx->node_count = spec->node_count;
+    internal_ctx->my_peers = graph->nodes[spec->my_rank].directions[COMM_GRAPH_CHILDREN];
+    internal_ctx->first_extra = ((spec->node_count != power) &&
     		(spec->my_rank < power)) ? (spec->my_rank + power) : 0;
-    (*internal_ctx)->power = power;
+    internal_ctx->power = power;
     return OK;
 }
 
@@ -88,12 +87,6 @@ int butterfly_next(comm_graph_t *graph, struct butterfly_ctx *internal_ctx,
 int butterfly_fix(comm_graph_t *graph, void *internal_ctx, node_id broken)
 {
     return ERROR;
-}
-
-int butterfly_end(struct butterfly_ctx *internal_ctx)
-{
-    free(internal_ctx);
-    return OK;
 }
 
 int butterfly_build(topology_spec_t *spec, comm_graph_t **graph)

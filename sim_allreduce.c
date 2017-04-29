@@ -71,7 +71,7 @@ int sim_test_iteration(sim_spec_t *spec, raw_stats_t *stats)
             ret_val = state_next_step(spec->state);
             spec->topology.step_index++;
 
-            if (spec->topology.step_index > 10) return ERROR;// TODO: remove!
+            if (spec->topology.step_index > 100) return ERROR;// TODO: remove!
         }
     }
 
@@ -403,6 +403,7 @@ const char HELP_STRING[] =
         "        6 - Enhanced random\n"
         "        7 - All of the above (default)\n\n"
         "    -i|--iterations <iter-count> - Test iteration count (default: 1)\n"
+        "    -x|--death-timeout <timeout> - Amount of steps to assume peer node is dead (default: 1)\n"
         "    -p|--procs <proc-count> - Set Amount of processes to simulate (default: 20)\n"
         "    -r|--radix <tree-radix> - Set tree radix for tree-based topologies "
         "(default: iterate from 3 to 10)\n\n"
@@ -434,6 +435,7 @@ int sim_coll_parse_args(int argc, char **argv, sim_spec_t *spec)
                 {"distance-max",   required_argument, 0, 'd' },
                 {"offset-max",     required_argument, 0, 'o' },
                 {"iterations",     required_argument, 0, 'i' },
+                {"death-tiemout",  required_argument, 0, 'x' },
                 {0,                0,                 0,  0  },
         };
 
@@ -493,6 +495,10 @@ int sim_coll_parse_args(int argc, char **argv, sim_spec_t *spec)
 
         case 'i':
             spec->test_count = atoi(optarg);
+            break;
+
+        case 'x':
+            spec->topology.death_timeout = atoi(optarg) + 1;
             break;
 
         case 'v':
@@ -562,10 +568,12 @@ int main(int argc, char **argv)
                 "step_count=%i "
                 "test_count=%i "
                 "tree_radix=%i "
+                "death_timeout=%i"
                 "random_seed=%i\n",
                 spec.topology.model_type, spec.topology.topology_type,
                 spec.step_count, spec.test_count,
                 spec.topology.topology.tree.radix,
+				spec.topology.death_timeout,
                 spec.topology.random_seed);
 
         /* CSV header */

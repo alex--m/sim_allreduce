@@ -11,23 +11,22 @@ struct tree_ctx {
     unsigned next_send_index;
 };
 
-int tree_start(topology_spec_t *spec, comm_graph_t *graph,
-               struct tree_ctx **internal_ctx)
-{
-    *internal_ctx = malloc(sizeof(struct tree_ctx));
-    if (!*internal_ctx) {
-        return ERROR;
-    }
+size_t tree_ctx_size() {
+	return sizeof(struct tree_ctx);
+}
 
-    (*internal_ctx)->next_wait_index = 0;
-    (*internal_ctx)->next_send_index = 0;
-    (*internal_ctx)->my_bitfield = spec->my_bitfield;
+int tree_start(topology_spec_t *spec, comm_graph_t *graph,
+               struct tree_ctx *internal_ctx)
+{
+    internal_ctx->next_wait_index = 0;
+    internal_ctx->next_send_index = 0;
+    internal_ctx->my_bitfield = spec->my_bitfield;
     assert(graph->node_count > spec->my_rank);
-    (*internal_ctx)->my_peers_up =
+    internal_ctx->my_peers_up =
             graph->nodes[spec->my_rank].directions[COMM_GRAPH_FATHERS];
-    (*internal_ctx)->my_peers_down =
+    internal_ctx->my_peers_down =
             graph->nodes[spec->my_rank].directions[COMM_GRAPH_CHILDREN];
-    (*internal_ctx)->my_node = spec->my_rank;
+    internal_ctx->my_node = spec->my_rank;
     return OK;
 }
 
@@ -124,12 +123,6 @@ int tree_fix(comm_graph_t *graph, struct tree_ctx *internal_ctx,
 		break;
 	}
     return ERROR;
-}
-
-int tree_end(struct tree_ctx *internal_ctx)
-{
-    free(internal_ctx);
-    return OK;
 }
 
 int tree_build(topology_spec_t *spec, comm_graph_t **graph)

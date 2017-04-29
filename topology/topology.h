@@ -46,6 +46,7 @@ typedef struct topology_spec
 	node_id my_rank;
 	node_id node_count;
 	unsigned char *my_bitfield;
+	unsigned death_timeout;
 	unsigned random_seed;
 	unsigned step_index; /* struct abuse in favor of optimization */
 
@@ -71,28 +72,32 @@ typedef struct topology_spec
 
 enum topology_map_slot
 {
-	TREE,
+	TREE = 0,
 	BUTTERFLY,
+
+	MAX /* must be last */
 };
 
 typedef struct topo_funcs
 {
-	int (*build_f)(topology_spec_t *spec, comm_graph_t **graph);
-	int (*start_f)(topology_spec_t *spec, comm_graph_t *graph, void **internal_ctx);
-	int (*next_f)(comm_graph_t *graph, void *internal_ctx, node_id *target, unsigned *distance);
-	int (*fix_f)(comm_graph_t *graph, void *internal_ctx, tree_recovery_type_t method, node_id broken);
-	int (*end_f)(void *internal_ctx);
+	size_t (*size_f)();
+	int    (*build_f)(topology_spec_t *spec, comm_graph_t **graph);
+	int    (*start_f)(topology_spec_t *spec, comm_graph_t *graph, void *internal_ctx);
+	int    (*next_f)(comm_graph_t *graph, void *internal_ctx, node_id *target, unsigned *distance);
+	int    (*fix_f)(comm_graph_t *graph, void *internal_ctx, tree_recovery_type_t method, node_id broken);
 } topo_funcs_t;
 
 typedef struct topology_iterator {
 	comm_graph_t *graph;
 	topology_spec_t *spec;
-	void *ctx; /* internal context for each iterator, type depends on topology */
 	topo_funcs_t funcs;
 	unsigned time_offset;
 	unsigned random_seed;
 	unsigned time_finished;
+	char ctx[0]; /* internal context for each iterator, type depends on topology */
 } topology_iterator_t;
+
+size_t topology_iterator_size();
 
 int topology_iterator_create(topology_spec_t *spec, topology_iterator_t *iterator);
 

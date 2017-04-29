@@ -126,7 +126,7 @@ int comm_graph_append(comm_graph_t* comm_graph, node_id src, node_id dst,
 	assert(src < comm_graph->node_count);
 	COMM_GRAPH_DIRECTION_APPEND(node, direction, dst);
 
-	if (comm_graph->is_bidirectional) {
+	if ((comm_graph->is_bidirectional) && (direction < 2)) {
 		node = &comm_graph->nodes[dst];
 		COMM_GRAPH_DIRECTION_APPEND(node, 1-direction, src);
 	}

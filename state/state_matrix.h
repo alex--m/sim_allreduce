@@ -114,7 +114,7 @@
 #define PRINT(ctx, local_node) ({                                             \
     int i;                                                                    \
 	for (i = 0; i < (ctx)->node_count; i++) {                                 \
-		printf("%i", IS_NEW_BIT_SET((ctx), local_node, i));                   \
+		printf("%i", IS_OLD_BIT_SET((ctx), local_node, i));                   \
 	}                                                                         \
     printf(" (is_full=%i)", IS_FULL((ctx), local_node));                      \
     printf(" (is_live=%i)", IS_LIVE((ctx), local_node));                      \
