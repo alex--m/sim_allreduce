@@ -37,17 +37,8 @@ int state_create(topology_spec_t *spec,
                  state_t *old_state,
                  state_t **new_state);
 
-/* generate a list of packets to be sent out to other peers (for MPI_Alltoallv) */
-int state_generate_next_step(state_t *state,
-                             void **sendbuf,
-                             int **sendcounts,
-                             int **sdispls,
-                             unsigned long *total);
-
-/* process a list of packets recieved from other peers (from MPI_Alltoallv) */
-int state_process_next_step(state_t *state,
-                            const char *incoming,
-                            unsigned length);
+/* Run the next step */
+int state_next_step(state_t *state);
 
 /* Collect stats */
 int state_get_raw_stats(state_t *state,

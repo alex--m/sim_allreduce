@@ -45,7 +45,6 @@ typedef struct topology_spec
 	int verbose;
 	node_id my_rank;
 	node_id node_count;
-	node_id local_node_count;
 	unsigned char *my_bitfield;
 	unsigned random_seed;
 	unsigned step_index; /* struct abuse in favor of optimization */

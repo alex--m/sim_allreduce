@@ -15,6 +15,17 @@
 	node->directions[direction]->nodes[node->directions[direction]->node_count++] = node_id; \
 }\
 
+#define COMM_GRAPH_LOCATE(node, direction, node_id) ({ \
+	int idx = 0; \
+	while ((idx < node->directions[direction]->node_count) && \
+		   (node->directions[direction]->nodes[idx] != node_id)) idx++; \
+	if (idx == node->directions[direction]->node_count) idx = -1; \
+	idx; \
+})
+
+#define COMM_GRAPH_IS_EXCLUDED(node, node_id) \
+		(COMM_GRAPH_LOCATE(node, COMM_GRAPH_EXCLUDE, node_id) == -1)
+
 comm_graph_t* comm_graph_create(node_id node_count, int is_bidirectional)
 {
 	comm_graph_node_t *new_node;
@@ -140,7 +151,10 @@ int comm_graph_copy(comm_graph_t* comm_graph, node_id src, node_id dst,
 			comm_graph->nodes[src].directions[src_direction];
 
 	for (index = 0; index < source->node_count; index++) {
-		COMM_GRAPH_DIRECTION_APPEND(dst_node, dst_direction, source->nodes[index]);
+		node_id candidate = source->nodes[index];
+		if (!COMM_GRAPH_IS_EXCLUDED(dst_node, candidate)) {
+			COMM_GRAPH_DIRECTION_APPEND(dst_node, dst_direction, candidate);
+		}
 	}
 
 	return OK;

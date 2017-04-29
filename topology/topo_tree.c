@@ -100,6 +100,9 @@ int tree_fix(comm_graph_t *graph, struct tree_ctx *internal_ctx,
 	comm_graph_append(graph, internal_ctx->my_node, broken, COMM_GRAPH_EXCLUDE);
 
 	switch (method) {
+	case COLLECTIVE_RECOVERY_BROTHER_FIRST: //TODO: implement!
+		/* calc brother - reverse BFS */
+		/* add brother as father, myself as his child */
 	case COLLECTIVE_RECOVERY_FATHER_FIRST:
 		if (broken < internal_ctx->my_node) {
 			/* the broken node is above me in the tree: */
@@ -116,9 +119,8 @@ int tree_fix(comm_graph_t *graph, struct tree_ctx *internal_ctx,
 		return comm_graph_copy(graph, broken, internal_ctx->my_node, COMM_GRAPH_CHILDREN, COMM_GRAPH_EXTRA_CHILDREN);
 		break;
 
-	case COLLECTIVE_RECOVERY_BROTHER_FIRST:
-		/* calc brother - reverse BFS */
-		/* add brother as father, myself as his child */
+
+	case COLLECTIVE_RECOVERY_ALL:
 		break;
 	}
     return ERROR;
