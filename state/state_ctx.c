@@ -125,7 +125,7 @@ static inline int state_enqueue(state_t *state, node_id destination_rank,
 	send_list_t *list = &state->delayed;
 	send_item_t *item;
 
-	printf("ENQUEUE from %i to %i! (distance=%i)\n", source_rank, destination_rank, distance);
+	printf("ENQUEUE from %lu to %lu! (distance=%i)\n", source_rank, destination_rank, distance);
 
 	/* make sure chuck has free slots */
 	if (list->allocated == list->used) {
@@ -211,7 +211,7 @@ static inline int state_dequeue(state_t *state)
 	for (slot_idx = 0; slot_idx < delayed->allocated; slot_idx++) {
 		item = &delayed->items[slot_idx];
 		if ((item->bitfield != NULL) && (--item->distance == 0)) {
-			printf("DEQUEUE from %i to %i!\n", item->src, item->dst);
+			printf("DEQUEUE from %lu to %lu!\n", item->src, item->dst);
 			state_send_message(state, item->dst, item->src, item->bitfield);
 			item->bitfield = NULL; /* mark as no longer used */
 			delayed->used--;
@@ -283,21 +283,21 @@ int state_next_step(state_t *state)
 			if (idx == 0) {
 				printf("\n");
 			}
-			printf("\nproc=%3i popcount:%3i\t", idx, POPCOUNT(state, idx));
+			printf("\nproc=%3lu popcount:%3u\t", idx, POPCOUNT(state, idx));
 			PRINT(state, idx);
 			if (distance != NO_PACKET) {
 				printf(" - sends to #%lu", destination);
 			} else if (ret_val == DONE) {
 				printf(" - Done!");
 			} else if (destination == (node_id)-1) {
-				printf(" - waits for somebody (bitfield incomplete)", destination);
+				printf(" - waits for somebody (bitfield incomplete)");
 			} else {
 				printf(" - waits for #%lu", destination);
 			}
 		}
 	}
 
-	printf("\nACTIVE=%i DEAD=%i\n", active_count, dead_count);
+	printf("\nACTIVE=%lu DEAD=%lu\n", active_count, dead_count);
 	return ((active_count - dead_count) > 0) ? OK : DONE;
 }
 
