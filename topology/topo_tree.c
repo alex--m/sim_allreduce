@@ -11,6 +11,17 @@ struct tree_ctx {
     unsigned next_send_index;
 };
 
+enum tree_ation {
+	TREE_SEND,
+	TREE_RECV,
+	TREE_WAIT
+};
+
+struct order {
+	enum comm_graph_direction_type direction;
+	enum tree_ation action;
+};
+
 size_t tree_ctx_size() {
 	return sizeof(struct tree_ctx);
 }
@@ -34,58 +45,62 @@ int tree_next(comm_graph_t *graph, struct tree_ctx *internal_ctx,
               node_id *target, unsigned *distance)
 {
     node_id next_peer;
-    node_id father_cnt = internal_ctx->my_peers_up->node_count;
-	node_id child_cnt = internal_ctx->my_peers_down->node_count;
-    node_id *fathers, *children = internal_ctx->my_peers_down->nodes;
+	unsigned order_idx;
+	unsigned wait_index = internal_ctx->next_wait_index;
+	unsigned send_index = internal_ctx->next_send_index;
+    struct order tree_order[] = {
+    		{COMM_GRAPH_CHILDREN,       TREE_RECV},
+			{COMM_GRAPH_FATHERS,        TREE_SEND},
+			{COMM_GRAPH_EXTRA_FATHERS,  TREE_SEND},
+			{COMM_GRAPH_EXCLUDE,        TREE_WAIT},
+			{COMM_GRAPH_EXTRA_FATHERS,  TREE_RECV},
+			{COMM_GRAPH_FATHERS,        TREE_RECV},
+    		{COMM_GRAPH_EXTRA_CHILDREN, TREE_SEND}
+    };
 
-    /* Optimization - check if done */
-    if (internal_ctx->next_send_index >= (child_cnt + father_cnt)) {
-    	return DONE;
-    }
+    for (order_idx = 0; order_idx < (sizeof(tree_order) / sizeof(*tree_order)); order_idx++) {
+    	enum comm_graph_direction_type dir_type = tree_order[order_idx].direction;
+    	comm_graph_direction_ptr_t dir_ptr =
+    			graph->nodes[internal_ctx->my_node].directions[dir_type];
+    	switch (tree_order[order_idx].action) {
+    	case TREE_RECV:
+    		if (wait_index < dir_ptr->node_count) {
+    			while (wait_index < dir_ptr->node_count) {
+    				next_peer = dir_ptr->nodes[wait_index];
+    				if (IS_BIT_SET_HERE(next_peer, internal_ctx->my_bitfield)) {
+    					internal_ctx->next_wait_index++;
+    					wait_index++;
+    				} else {
+    					*distance = NO_PACKET;
+    					*target = next_peer;
+    					return OK;
+    				}
+    			}
+    		} else {
+    			wait_index -= dir_ptr->node_count;
+    		}
+    		break;
 
-	/* Wait for nodes going down */
-	while (internal_ctx->next_wait_index < child_cnt) {
-		next_peer = children[internal_ctx->next_wait_index];
-		if (IS_BIT_SET_HERE(next_peer, internal_ctx->my_bitfield)) {
-			internal_ctx->next_wait_index++;
-		} else {
-			*distance = NO_PACKET;
-			*target = next_peer;
-			return OK;
-		}
-	}
+    	case TREE_SEND:
+    		if (send_index < dir_ptr->node_count) {
+    			*target = dir_ptr->nodes[send_index];
+    			internal_ctx->next_send_index++;
+    			return OK;
+    		} else {
+    			send_index -= dir_ptr->node_count;
+    		}
+    		break;
 
-    /* Send all nodes going up */
-	fathers = internal_ctx->my_peers_up->nodes;
-    if (internal_ctx->next_send_index < father_cnt) {
-    	*target = fathers[internal_ctx->next_send_index++];
-    	return OK;
-    }
-
-    /* Wait for nodes going up */
-    while (internal_ctx->next_wait_index < (child_cnt + father_cnt)) {
-    	next_peer = fathers[internal_ctx->next_wait_index - child_cnt];
-    	if (IS_BIT_SET_HERE(next_peer, internal_ctx->my_bitfield)) {
-    			internal_ctx->next_wait_index++;
-    	    } else {
-    	        *distance = NO_PACKET;
-    	        *target = next_peer;
-    	        return OK;
-    	    }
-    }
-
-    /* Wait for bitmap to be full before distributing */
-    if (!IS_FULL_HERE(internal_ctx->my_bitfield))
-    {
-    	*distance = NO_PACKET;
-    	*target = -1;
-        return OK;
-    }
-
-    /* Send all nodes going down */
-    if (internal_ctx->next_send_index < (child_cnt + father_cnt)) {
-    	*target = children[internal_ctx->next_send_index++ - father_cnt];
-    	return OK;
+    	case TREE_WAIT:
+    		/* Wait for bitmap to be full before distributing */
+    		if (!IS_FULL_HERE(internal_ctx->my_bitfield))
+    		{
+    			*distance = NO_PACKET;
+    			*target = -1;
+    			return OK;
+    		}
+    		break;
+    	}
     }
 
     /* No more packets to send - we're done here! */

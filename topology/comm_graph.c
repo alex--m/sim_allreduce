@@ -131,6 +131,19 @@ int comm_graph_append(comm_graph_t* comm_graph, node_id src, node_id dst,
 		COMM_GRAPH_DIRECTION_APPEND(node, 1-direction, src);
 	}
 
+	if (direction == COMM_GRAPH_EXCLUDE) {
+		for (direction = 0; direction < COMM_GRAPH_MAX_DIMENTIONS; direction++) {
+			comm_graph_direction_ptr_t ptr = node->directions[direction];
+			if (direction != COMM_GRAPH_EXCLUDE) {
+				for (unsigned idx = 0; idx < ptr->node_count; idx++) {
+					if (ptr->nodes[idx] == dst) {
+						ptr->nodes[idx] = ptr->nodes[--ptr->node_count];
+					}
+				}
+			}
+		}
+	}
+
 	return OK;
 }
 
