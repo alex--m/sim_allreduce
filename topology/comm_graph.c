@@ -24,7 +24,7 @@
 })
 
 #define COMM_GRAPH_IS_EXCLUDED(node, node_id) \
-		(COMM_GRAPH_LOCATE(node, COMM_GRAPH_EXCLUDE, node_id) == -1)
+		(COMM_GRAPH_LOCATE(node, COMM_GRAPH_EXCLUDE, node_id) != -1)
 
 comm_graph_t* comm_graph_create(node_id node_count, int is_bidirectional)
 {
@@ -121,28 +121,17 @@ void comm_graph_destroy(comm_graph_t* comm_graph)
 int comm_graph_append(comm_graph_t* comm_graph, node_id src, node_id dst,
 		enum comm_graph_direction_type direction)
 {
-    unsigned idx;
 	comm_graph_node_t *node = &comm_graph->nodes[src];
 	assert(src < comm_graph->node_count);
-	assert(src < comm_graph->node_count);
+	assert(dst < comm_graph->node_count);
+	assert((src != dst) || (direction == COMM_GRAPH_EXCLUDE));
 	COMM_GRAPH_DIRECTION_APPEND(node, direction, dst);
 
-	if ((comm_graph->is_bidirectional) && (direction < 2)) {
+	if ((comm_graph->is_bidirectional) &&
+		((direction == COMM_GRAPH_CHILDREN) ||
+		 (direction == COMM_GRAPH_MR_CHILDREN))) {
 		node = &comm_graph->nodes[dst];
-		COMM_GRAPH_DIRECTION_APPEND(node, 1-direction, src);
-	}
-
-	if (direction == COMM_GRAPH_EXCLUDE) {
-		for (direction = 0; direction < COMM_GRAPH_MAX_DIMENTIONS; direction++) {
-			comm_graph_direction_ptr_t ptr = node->directions[direction];
-			if (direction != COMM_GRAPH_EXCLUDE) {
-				for (idx = 0; idx < ptr->node_count; idx++) {
-					if (ptr->nodes[idx] == dst) {
-						ptr->nodes[idx] = ptr->nodes[--ptr->node_count];
-					}
-				}
-			}
-		}
+		COMM_GRAPH_DIRECTION_APPEND(node, COMM_GRAPH_FATHERS, src);
 	}
 
 	return OK;
@@ -166,7 +155,9 @@ int comm_graph_copy(comm_graph_t* comm_graph, node_id src, node_id dst,
 
 	for (index = 0; index < source->node_count; index++) {
 		node_id candidate = source->nodes[index];
+		printf("ADDING1 %lu as dir=%i to %lu\n", candidate, dst_direction, dst);
 		if (!COMM_GRAPH_IS_EXCLUDED(dst_node, candidate)) {
+			printf("ADDING0 %lu as dir=%i to %lu\n", candidate, dst_direction, dst);
 			COMM_GRAPH_DIRECTION_APPEND(dst_node, dst_direction, candidate);
 		}
 	}

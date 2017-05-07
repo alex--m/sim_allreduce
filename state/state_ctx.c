@@ -179,17 +179,18 @@ static inline int state_send_message(state_t *state, node_id destination_rank,
 	int ret_val = OK;
 
 	if (IS_LIVE(state, destination_rank)) {
-		if (IS_LIVE_HERE(bitfield)) {
-			/* live A sends to live B */
-			MERGE(state, destination_rank, bitfield);
-		} else {
+		/* live A sends to live B */
+		MERGE(state, destination_rank, bitfield);
+		if (!IS_LIVE_HERE(bitfield)) {
 			/* dead A sends to live B - simulates timeout on B */
 			ret_val = topology_iterator_omit(GET_ITERATOR(state, destination_rank),
 					state->recovery, source_rank);
 		}
 	} else {
+		printf("Tell %lu that %lu is dead?\n", source_rank, destination_rank);
 		if (IS_LIVE_HERE(bitfield)) {
 			/* live A sends to dead B - send back a notification (simulates timeout) */
+			printf("Tell %lu that %lu is dead!\n", source_rank, destination_rank);
 			ret_val = state_enqueue(state, source_rank,
 					destination_rank, state->death_timeout);
 		} /* else: dead A sends to dead B - rare, if B died since his send */

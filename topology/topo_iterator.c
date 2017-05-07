@@ -39,13 +39,12 @@ int topology_iterator_create(topology_spec_t *spec, topology_iterator_t *iterato
 	case COLLECTIVE_TOPOLOGY_ALL:
 		return ERROR;
 	}
-
-	memcpy(&iterator->funcs, &topo_map[map_slot], sizeof(topo_funcs_t));
+	iterator->funcs = &topo_map[map_slot];
 
 	/* Build the communication graph, if not built yet */
 	if (current_reference_count++ == 0) {
 		assert(!current_topology);
-		ret_val = iterator->funcs.build_f(spec, &current_topology);
+		ret_val = iterator->funcs->build_f(spec, &current_topology);
 		if (ret_val != OK) {
 			return ret_val;
 		}
@@ -64,7 +63,13 @@ int topology_iterator_create(topology_spec_t *spec, topology_iterator_t *iterato
 		(iterator->spec->model.node_fail_rate > FLOAT_RANDOM(iterator->spec))) {
 		SET_DEAD(iterator);
 	}
-	return iterator->funcs.start_f(spec, current_topology, &iterator->ctx[0]);
+
+	ret_val = comm_graph_append(current_topology, spec->my_rank, spec->my_rank, COMM_GRAPH_EXCLUDE);
+	if (ret_val != OK) {
+		return ret_val;
+	}
+
+	return iterator->funcs->start_f(spec, current_topology, &iterator->ctx[0]);
 }
 
 int topology_iterator_next(topology_iterator_t *iterator, node_id *target, unsigned *distance)
@@ -100,8 +105,7 @@ int topology_iterator_next(topology_iterator_t *iterator, node_id *target, unsig
 
 	case COLLECTIVE_MODEL_NODES_MISSING:
 		if (IS_DEAD(iterator)) {
-			*distance = NO_PACKET;
-			return OK;
+			*distance = iterator->spec->death_timeout; /* Dead are "sending" their timeout */
 		}
 		break;
 
@@ -109,7 +113,7 @@ int topology_iterator_next(topology_iterator_t *iterator, node_id *target, unsig
 		break;
     }
 
-	return iterator->funcs.next_f(iterator->graph, iterator->ctx, target, distance);
+	return iterator->funcs->next_f(iterator->graph, iterator->ctx, target, distance);
 }
 
 int topology_iterator_omit(topology_iterator_t *iterator, tree_recovery_type_t method, node_id broken)
@@ -118,7 +122,7 @@ int topology_iterator_omit(topology_iterator_t *iterator, tree_recovery_type_t m
 		iterator->graph = comm_graph_clone(current_topology);
 	}
 
-	return iterator->funcs.fix_f(iterator->graph, iterator->ctx, method, broken);
+	return iterator->funcs->fix_f(iterator->graph, iterator->ctx, method, broken);
 }
 
 void topology_iterator_destroy(topology_iterator_t *iterator)

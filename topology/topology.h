@@ -91,7 +91,7 @@ typedef struct topo_funcs
 typedef struct topology_iterator {
 	comm_graph_t *graph;
 	topology_spec_t *spec;
-	topo_funcs_t funcs;
+	topo_funcs_t *funcs;
 	unsigned time_offset;
 	unsigned random_seed;
 	unsigned time_finished;
