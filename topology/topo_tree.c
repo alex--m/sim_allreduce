@@ -67,7 +67,7 @@ int tree_next(comm_graph_t *graph, struct tree_ctx *internal_ctx,
     					wait_index++;
     				} else {
     					internal_ctx->next_wait_index = wait_index;
-    					*distance = NO_PACKET;
+    					//*distance = NO_PACKET; // TODO: for effeciency: delay first packet - so it's not like RD...
     					*target = next_peer;
     					return OK;
     				}
