@@ -133,15 +133,17 @@ int sim_test(sim_spec_t *spec)
     }
 
     if (is_root) {
-        printf("%i,%i,%i,%i,%i,%i,%.1f,%.1f,%.1f,%i",
+        printf("%i,%i,%i,%i,%i,%i,%i,%.1f,%.1f,%.1f,%i",
                spec->node_count,
                spec->topology.model_type,
                spec->topology.topology_type,
                spec->topology.topology.tree.radix,
 			   (spec->topology.model_type == COLLECTIVE_MODEL_TIME_OFFSET) ?
 			   		   spec->topology.model.time_offset_max : 0,
-			   (spec->topology.model_type == COLLECTIVE_MODEL_PACKET_DELAY) ?
-					   spec->topology.model.packet_delay_max : 0,
+			   (spec->topology.model_type == COLLECTIVE_MODEL_FIXED_DELAY) ?
+					   spec->topology.model.packet_delay : 0,
+			   (spec->topology.model_type == COLLECTIVE_MODEL_RANDOM_DELAY) ?
+					   spec->topology.model.packet_delay : 0,
 			   (spec->topology.model_type == COLLECTIVE_MODEL_PACKET_DROP) ?
 					   spec->topology.model.packet_drop_rate : 0,
 			   (spec->topology.model_type == COLLECTIVE_MODEL_NODES_MISSING) ?
@@ -241,7 +243,7 @@ int sim_coll_model_packet_delay(sim_spec_t *spec)
     int ret_val = OK;
     unsigned index, base2;
 
-    if (spec->topology.model.packet_delay_max != 0) {
+    if (spec->topology.model.packet_delay != 0) {
         return sim_coll_topology(spec);
     }
 
@@ -249,11 +251,11 @@ int sim_coll_model_packet_delay(sim_spec_t *spec)
     for (base2 = 1; base2 * base2 < spec->node_count; base2 = base2 * 2);
 
     for (index = 1; ((index <= base2) && (ret_val == OK)); index <<= 1) {
-    	spec->topology.model.packet_delay_max = index;
+    	spec->topology.model.packet_delay = index;
         ret_val = sim_coll_topology(spec);
     }
 
-    spec->topology.model.packet_delay_max = 0;
+    spec->topology.model.packet_delay = 0;
     return ret_val;
 }
 
@@ -338,7 +340,8 @@ int sim_coll_model_vars(sim_spec_t *spec)
     case COLLECTIVE_MODEL_ITERATIVE:
         return sim_coll_topology(spec);
 
-    case COLLECTIVE_MODEL_PACKET_DELAY:
+    case COLLECTIVE_MODEL_FIXED_DELAY:
+    case COLLECTIVE_MODEL_RANDOM_DELAY:
         return sim_coll_model_packet_delay(spec);
 
     case COLLECTIVE_MODEL_PACKET_DROP:
@@ -389,19 +392,19 @@ const char HELP_STRING[] =
         "Collecive simulator, by Alex Margolin.\nOptional arguments:\n\n"
         "    -m|--model <collective-model>\n"
         "        0 - Iterative\n"
-        "        1 - Non-uniform\n"
-        "        2 - Packet drop\n"
-        "        3 - Time-offset\n"
-        "        4 - All of the above (default)\n\n"
+		"        1 - Fixed distance\n"
+		"        2 - Random distance (uniform distribution)\n"
+		"        3 - Random time-offset (\"spread\", uniform distribution)\n"
+		"        4 - Missing nodes (\"inactive\", uniform distribution))\n"
+		"        5 - Failing nodes (\"online failure\", uniform distribution))\n"
+        "        6 - All of the above (default)\n\n"
         "    -t|--topology <collective-topology>\n"
         "        0 - N-array tree\n"
         "        1 - K-nomial tree\n"
         "        2 - N-array tree, multi-root\n"
         "        3 - K-nomial tree, multi-root\n"
         "        4 - Recursive K-ing\n"
-        "        5 - Random\n"
-        "        6 - Enhanced random\n"
-        "        7 - All of the above (default)\n\n"
+        "        5 - All of the above (default)\n\n"
         "    -i|--iterations <iter-count> - Test iteration count (default: 1)\n"
         "    -x|--death-timeout <timeout> - Amount of steps to assume peer node is dead (default: 1)\n"
         "    -p|--procs <proc-count> - Set Amount of processes to simulate (default: 20)\n"
@@ -413,8 +416,8 @@ const char HELP_STRING[] =
         "        2 - All of the above (default)\n\n"
         "    -f|--fail-rate <percentage> - Set failure percentage for packet drop "
         "model (default: iterate from 0.1 to 0.6 in incements of 0.2)\n\n"
-        "    -d|--distance-max <iterations> - Set maximum distance for Non-uniform "
-                "model (default: iterate from 1 to 16 in powers of 2)\n\n"
+        "    -d|--distance <iterations> - Set constant or maximum distance for fixed/random "
+        "models (default: iterate from 1 to 16 in powers of 2)\n\n"
         "    -o|--offset-max <iterations> - Set maximum offset for Time-offset "
         "model (default: iterate from 0 to procs in powers of 2)\n\n"
         "";
@@ -432,7 +435,7 @@ int sim_coll_parse_args(int argc, char **argv, sim_spec_t *spec)
                 {"radix",          required_argument, 0, 'r' },
 				{"recovery",       required_argument, 0, 'c' },
                 {"fail-rate",      required_argument, 0, 'f' },
-                {"distance-max",   required_argument, 0, 'd' },
+                {"distance",       required_argument, 0, 'd' },
                 {"offset-max",     required_argument, 0, 'o' },
                 {"iterations",     required_argument, 0, 'i' },
                 {"death-tiemout",  required_argument, 0, 'x' },
@@ -486,7 +489,7 @@ int sim_coll_parse_args(int argc, char **argv, sim_spec_t *spec)
             break;
 
         case 'd':
-        	spec->topology.model.packet_delay_max = atoi(optarg);
+        	spec->topology.model.packet_delay = atoi(optarg);
             break;
 
         case 'o':

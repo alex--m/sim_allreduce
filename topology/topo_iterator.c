@@ -77,8 +77,12 @@ int topology_iterator_next(topology_iterator_t *iterator, node_id *target, unsig
 	*distance = 0;
 	switch (iterator->spec->model_type)
 	{
-	case COLLECTIVE_MODEL_PACKET_DELAY:
-        *distance = CYCLIC_RANDOM(iterator->spec, iterator->spec->model.packet_delay_max);
+	case COLLECTIVE_MODEL_FIXED_DELAY:
+        *distance = iterator->spec->model.packet_delay;
+        break;
+
+	case COLLECTIVE_MODEL_RANDOM_DELAY:
+        *distance = CYCLIC_RANDOM(iterator->spec, iterator->spec->model.packet_delay);
         break;
 
 	case COLLECTIVE_MODEL_PACKET_DROP:

@@ -24,7 +24,8 @@ typedef enum topology_type
 typedef enum model_type
 {
     COLLECTIVE_MODEL_ITERATIVE = 0, /* Basic collective */
-    COLLECTIVE_MODEL_PACKET_DELAY,  /* Random packet delay */
+    COLLECTIVE_MODEL_FIXED_DELAY,   /* Fixed packet delay */
+    COLLECTIVE_MODEL_RANDOM_DELAY,  /* Random packet delay */
     COLLECTIVE_MODEL_PACKET_DROP,   /* Random failure at times */
     COLLECTIVE_MODEL_TIME_OFFSET,   /* Random start time offset */
 	COLLECTIVE_MODEL_NODES_MISSING, /* Random nodes do not take part */
@@ -64,10 +65,10 @@ typedef struct topology_spec
 
 	model_type_t model_type;
 	union {
+		unsigned packet_delay;
 		float node_fail_rate;
 		float packet_drop_rate;
 		unsigned time_offset_max;
-		unsigned packet_delay_max;
 	} model;
 } topology_spec_t;
 
