@@ -17,15 +17,6 @@ typedef struct raw_stats {
 	unsigned long data_len_counter;
 } raw_stats_t;
 
-typedef struct exchange_optimization
-{
-	char *buf;
-	int buf_len;
-	int dtype_len;
-	int *counts;
-	int *displs;
-} optimization_t;
-
 void stats_calc(struct stats *stats, unsigned long value, int is_root, MPI_Comm comm);
 
 void stats_aggregate(struct stats *stats, int is_root, MPI_Comm comm);

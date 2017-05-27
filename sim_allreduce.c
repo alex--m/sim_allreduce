@@ -17,9 +17,9 @@ typedef struct sim_spec
 	topology_spec_t topology;
 
 	unsigned node_count; /* Total number of nodes */
-	unsigned last_node_total_size; /* OPTIMIZATION */
 	unsigned test_count; /* for statistical purposes */
     unsigned step_count; /* 0 to run until -1 is returned */
+	unsigned last_node_total_size; /* OPTIMIZATION */
 
     unsigned mpi_rank;
     unsigned mpi_size;
@@ -94,7 +94,7 @@ int sim_test(sim_spec_t *spec)
     int is_root = (spec->mpi_rank == 0);
 
     /* no need to collect statistics on deterministic algorithms */
-    if (spec->topology.model_type == COLLECTIVE_MODEL_ITERATIVE) {
+    if (spec->topology.model_type == COLLECTIVE_MODEL_BASE) {
             test_count = 1;
     }
 
@@ -133,19 +133,13 @@ int sim_test(sim_spec_t *spec)
     }
 
     if (is_root) {
-        printf("%i,%i,%i,%i,%i,%i,%i,%.1f,%.1f,%.1f,%i",
+        printf("%i,%i,%i,%i,%i,%.1f,%.1f,%i",
                spec->node_count,
                spec->topology.model_type,
                spec->topology.topology_type,
                spec->topology.topology.tree.radix,
-			   (spec->topology.model_type == COLLECTIVE_MODEL_TIME_OFFSET) ?
-			   		   spec->topology.model.time_offset_max : 0,
-			   (spec->topology.model_type == COLLECTIVE_MODEL_FIXED_DELAY) ?
-					   spec->topology.model.packet_delay : 0,
-			   (spec->topology.model_type == COLLECTIVE_MODEL_RANDOM_DELAY) ?
-					   spec->topology.model.packet_delay : 0,
-			   (spec->topology.model_type == COLLECTIVE_MODEL_PACKET_DROP) ?
-					   spec->topology.model.packet_drop_rate : 0,
+			   (spec->topology.model_type == COLLECTIVE_MODEL_SPREAD) ?
+			   		   spec->topology.model.max_spread : 0,
 			   (spec->topology.model_type == COLLECTIVE_MODEL_NODES_MISSING) ?
 					   spec->topology.model.node_fail_rate : 0,
 			   (spec->topology.model_type == COLLECTIVE_MODEL_NODES_FAILING) ?
@@ -238,12 +232,12 @@ int sim_coll_topology(sim_spec_t *spec)
     return ret_val;
 }
 
-int sim_coll_model_packet_delay(sim_spec_t *spec)
+int sim_coll_model_spread(sim_spec_t *spec)
 {
     int ret_val = OK;
     unsigned index, base2;
 
-    if (spec->topology.model.packet_delay != 0) {
+    if (spec->topology.model.max_spread != 0) {
         return sim_coll_topology(spec);
     }
 
@@ -251,50 +245,11 @@ int sim_coll_model_packet_delay(sim_spec_t *spec)
     for (base2 = 1; base2 * base2 < spec->node_count; base2 = base2 * 2);
 
     for (index = 1; ((index <= base2) && (ret_val == OK)); index <<= 1) {
-    	spec->topology.model.packet_delay = index;
+    	spec->topology.model.max_spread = index;
         ret_val = sim_coll_topology(spec);
     }
 
-    spec->topology.model.packet_delay = 0;
-    return ret_val;
-}
-
-int sim_coll_model_packet_drop(sim_spec_t *spec)
-{
-    int ret_val = OK;
-    float index;
-
-    if (spec->topology.model.packet_drop_rate != 0) {
-        return sim_coll_topology(spec);
-    }
-
-    for (index = 0.1; ((index < 0.6) && (ret_val == OK)); index += 0.2) {
-    	spec->topology.model.packet_drop_rate = index;
-        ret_val = sim_coll_topology(spec);
-    }
-
-    spec->topology.model.packet_drop_rate = 0;
-    return ret_val;
-}
-
-int sim_coll_model_time_offset(sim_spec_t *spec)
-{
-    int ret_val = OK;
-    unsigned index, base2;
-
-    if (spec->topology.model.time_offset_max != 0) {
-        return sim_coll_topology(spec);
-    }
-
-    /* Calculate the upper limit as closest power of 2 to the square root */
-    for (base2 = 1; base2 * base2 < spec->node_count; base2 = base2 * 2);
-
-    for (index = 1; ((index <= base2) && (ret_val == OK)); index <<= 1) {
-    	spec->topology.model.time_offset_max = index;
-        ret_val = sim_coll_topology(spec);
-    }
-
-    spec->topology.model.time_offset_max = 0;
+    spec->topology.model.max_spread = 0;
     return ret_val;
 }
 
@@ -312,49 +267,24 @@ int sim_coll_model_nodes_missing(sim_spec_t *spec)
         ret_val = sim_coll_topology(spec);
     }
 
-    spec->topology.model.packet_drop_rate = 0;
-    return ret_val;
-}
-
-int sim_coll_model_nodes_failing(sim_spec_t *spec)
-{
-    int ret_val = OK;
-    float index;
-
-    if (spec->topology.model.node_fail_rate != 0) {
-        return sim_coll_topology(spec);
-    }
-
-    for (index = 0.1; ((index < 0.1) && (ret_val == OK)); index += 0.01) {
-    	spec->topology.model.node_fail_rate = index;
-        ret_val = sim_coll_topology(spec);
-    }
-
-    spec->topology.model.packet_drop_rate = 0;
+    spec->topology.model.node_fail_rate = 0;
     return ret_val;
 }
 
 int sim_coll_model_vars(sim_spec_t *spec)
 {
     switch (spec->topology.model_type) {
-    case COLLECTIVE_MODEL_ITERATIVE:
+    case COLLECTIVE_MODEL_BASE:
         return sim_coll_topology(spec);
 
-    case COLLECTIVE_MODEL_FIXED_DELAY:
-    case COLLECTIVE_MODEL_RANDOM_DELAY:
-        return sim_coll_model_packet_delay(spec);
-
-    case COLLECTIVE_MODEL_PACKET_DROP:
-        return sim_coll_model_packet_drop(spec);
-
-    case COLLECTIVE_MODEL_TIME_OFFSET:
-        return sim_coll_model_time_offset(spec);
+    case COLLECTIVE_MODEL_SPREAD:
+        return sim_coll_model_spread(spec);
 
     case COLLECTIVE_MODEL_NODES_MISSING:
     	return sim_coll_model_nodes_missing(spec);
 
     case COLLECTIVE_MODEL_NODES_FAILING:
-    	return sim_coll_model_nodes_failing(spec);
+    	return sim_coll_model_nodes_missing(spec);
 
     default:
         PERROR("Unknown Model!\n");
@@ -406,20 +336,16 @@ const char HELP_STRING[] =
         "        4 - Recursive K-ing\n"
         "        5 - All of the above (default)\n\n"
         "    -i|--iterations <iter-count> - Test iteration count (default: 1)\n"
-        "    -x|--death-timeout <timeout> - Amount of steps to assume peer node is dead (default: 1)\n"
         "    -p|--procs <proc-count> - Set Amount of processes to simulate (default: 20)\n"
-        "    -r|--radix <tree-radix> - Set tree radix for tree-based topologies "
-        "(default: iterate from 3 to 10)\n\n"
+        "    -r|--radix <tree-radix> - Set tree radix for tree-based topologies"
+        " (default: iterate from 3 to 10)\n\n"
 		"    -c|--recovery <recovery-method> - Set the method for tree fault recovery:"
         "        0 - Fall back to fathers, up the tree\n"
         "        1 - Fall back to brothers, across the tree\n"
         "        2 - All of the above (default)\n\n"
-        "    -f|--fail-rate <percentage> - Set failure percentage for packet drop "
-        "model (default: iterate from 0.1 to 0.6 in incements of 0.2)\n\n"
-        "    -d|--distance <iterations> - Set constant or maximum distance for fixed/random "
-        "models (default: iterate from 1 to 16 in powers of 2)\n\n"
-        "    -o|--offset-max <iterations> - Set maximum offset for Time-offset "
-        "model (default: iterate from 0 to procs in powers of 2)\n\n"
+        "    -l|--latency <iterations> - Set the message delivery latency (default: 10)\n\n"
+        "    -s|--max-spread <iterations> - Set maximum spread between processes"
+        " (default: iterate from 0 to procs in powers of 2)\n\n"
         "";
 
 int sim_coll_parse_args(int argc, char **argv, sim_spec_t *spec)
@@ -435,10 +361,9 @@ int sim_coll_parse_args(int argc, char **argv, sim_spec_t *spec)
                 {"radix",          required_argument, 0, 'r' },
 				{"recovery",       required_argument, 0, 'c' },
                 {"fail-rate",      required_argument, 0, 'f' },
-                {"distance",       required_argument, 0, 'd' },
-                {"offset-max",     required_argument, 0, 'o' },
+                {"latency",        required_argument, 0, 'l' },
+                {"max-spread",     required_argument, 0, 's' },
                 {"iterations",     required_argument, 0, 'i' },
-                {"death-tiemout",  required_argument, 0, 'x' },
                 {0,                0,                 0,  0  },
         };
 
@@ -479,29 +404,16 @@ int sim_coll_parse_args(int argc, char **argv, sim_spec_t *spec)
             spec->topology.topology.tree.radix = atoi(optarg);
             break;
 
-        case 'f':
-            spec->topology.model.packet_drop_rate = atof(optarg);
-            if ((spec->topology.model.packet_drop_rate <= 0.0) ||
-            	(spec->topology.model.packet_drop_rate >= 1.0)) {
-                printf("Invalid argument for -f: %s\n%s", optarg, HELP_STRING);
-                return ERROR;
-            }
+        case 'l':
+        	spec->topology.latency = atoi(optarg);
             break;
 
-        case 'd':
-        	spec->topology.model.packet_delay = atoi(optarg);
-            break;
-
-        case 'o':
-        	spec->topology.model.time_offset_max = atoi(optarg);
+        case 's':
+        	spec->topology.model.max_spread = atoi(optarg);
             break;
 
         case 'i':
             spec->test_count = atoi(optarg);
-            break;
-
-        case 'x':
-            spec->topology.death_timeout = atoi(optarg) + 1;
             break;
 
         case 'v':
@@ -534,6 +446,7 @@ int main(int argc, char **argv)
     /* Set the defaults */
     sim_spec_t spec = {0};
     spec.topology.verbose = 0;
+    spec.topology.latency = 10;
     spec.topology.model_type = COLLECTIVE_MODEL_ALL;
     spec.topology.topology_type = COLLECTIVE_TOPOLOGY_ALL;
     spec.test_count = DEFAULT_TEST_COUNT;
@@ -571,12 +484,12 @@ int main(int argc, char **argv)
                 "step_count=%i "
                 "test_count=%i "
                 "tree_radix=%i "
-                "death_timeout=%i"
+                "latency=%i"
                 "random_seed=%i\n",
                 spec.topology.model_type, spec.topology.topology_type,
                 spec.step_count, spec.test_count,
                 spec.topology.topology.tree.radix,
-				spec.topology.death_timeout,
+				spec.topology.latency,
                 spec.topology.random_seed);
 
         /* CSV header */

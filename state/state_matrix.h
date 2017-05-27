@@ -13,7 +13,7 @@
 #define CTX_BITFIELD_SIZE(ctx) ((ctx)->bitfield_size)
 
 #define CTX_MATRIX_SIZE(ctx) \
-    ((ctx)->node_count * CTX_BITFIELD_SIZE(ctx))
+    ((ctx)->spec->node_count * CTX_BITFIELD_SIZE(ctx))
 
 #define GET_OLD_BITFIELD(ctx, local_node) ((ctx)->old_matrix + \
     ((local_node) * CTX_BITFIELD_SIZE(ctx)))
@@ -76,7 +76,7 @@
 })
 
 #define POPCOUNT(ctx, local_node) \
-	POPCOUNT_HERE(GET_NEW_BITFIELD(ctx, local_node), ctx->node_count)
+	POPCOUNT_HERE(GET_NEW_BITFIELD(ctx, local_node), ctx->spec->node_count)
 
 #define MY_POPCOUNT(ctx) POPCOUNT(ctx, ctx->my_rank)
 
@@ -102,9 +102,9 @@
 			out_cnt += __builtin_popcount(*(present + i));                    \
 			in_cnt += __builtin_popcount(added);                              \
 		}                                                                     \
-		/*ctx->spec->messages_counter++;*/                                        \
-		/*ctx->spec->data_len_counter += in_cnt;*/                                \
-		if (out_cnt == ctx->node_count) SET_FULL(ctx, local_node);            \
+		ctx->stats.messages_counter++;                                        \
+		ctx->stats.data_len_counter += in_cnt;                                \
+		if (out_cnt == ctx->spec->node_count) SET_FULL(ctx, local_node);      \
     }                                                                         \
 })
 
@@ -113,7 +113,7 @@
 
 #define PRINT(ctx, local_node) ({                                             \
     int i;                                                                    \
-	for (i = 0; i < (ctx)->node_count; i++) {                                 \
+	for (i = 0; i < (ctx)->spec->node_count; i++) {                           \
 		printf("%i", IS_OLD_BIT_SET((ctx), local_node, i));                   \
 	}                                                                         \
     printf(" (is_full=%i)", IS_FULL((ctx), local_node));                      \

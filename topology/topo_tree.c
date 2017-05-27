@@ -9,7 +9,15 @@ struct tree_ctx {
     unsigned next_send_index;
 };
 
-enum tree_ation {
+enum tree_msg_type {
+	TREE_MSG_DATA,
+	TREE_MSG_SON_KEEPALIVE,
+	TREE_MSG_FATHER_KEEPALIVE,
+	TREE_MSG_SON_DONE,
+	TREE_MSG_FATHER_DONE,
+};
+
+enum tree_action {
 	TREE_SEND,
 	TREE_RECV,
 	TREE_WAIT
@@ -17,7 +25,7 @@ enum tree_ation {
 
 struct order {
 	enum comm_graph_direction_type direction;
-	enum tree_ation action;
+	enum tree_action action;
 };
 
 size_t tree_ctx_size() {
@@ -35,11 +43,12 @@ int tree_start(topology_spec_t *spec, comm_graph_t *graph,
     return OK;
 }
 
-int tree_next(comm_graph_t *graph, struct tree_ctx *internal_ctx,
-              node_id *target, unsigned *distance)
+int tree_next(comm_graph_t *graph, send_list_t *in_queue,
+		      struct tree_ctx *internal_ctx, send_item_t *result)
 {
+	send_item_t *it;
 	node_id next_peer;
-	unsigned order_idx;
+	unsigned order_idx, pkt_idx, used;
 	unsigned wait_index = internal_ctx->next_wait_index;
 	unsigned send_index = internal_ctx->next_send_index;
 	comm_graph_node_t *my_node = &graph->nodes[internal_ctx->my_node];
@@ -55,6 +64,20 @@ int tree_next(comm_graph_t *graph, struct tree_ctx *internal_ctx,
     		{COMM_GRAPH_EXTRA_CHILDREN, TREE_SEND}
     };
 
+    for (pkt_idx = 0, it = &in_queue->items[0], used = in_queue->used;
+    	 (pkt_idx < in_queue->allocated) && (used > 0);
+    	 pkt_idx++, it++) {
+    	if (it->distance != DISTANCE_VACANT) {
+    		if (it->msg == TREE_MSG_DATA) {
+    			memcpy(result, it, sizeof(*it));
+    			it->distance = DISTANCE_VACANT;
+    			assert(it->bitfield != BITFIELD_FILL_AND_SEND);
+    			return OK;
+    		}
+    		used--;
+    	}
+    }
+
     for (order_idx = 0; order_idx < (sizeof(tree_order) / sizeof(*tree_order)); order_idx++) {
     	enum comm_graph_direction_type dir_type = tree_order[order_idx].direction;
     	comm_graph_direction_ptr_t dir_ptr = my_node->directions[dir_type];
@@ -66,10 +89,9 @@ int tree_next(comm_graph_t *graph, struct tree_ctx *internal_ctx,
     				if (IS_BIT_SET_HERE(next_peer, internal_ctx->my_bitfield)) {
     					wait_index++;
     				} else {
+    					printf("waiting for %lu", next_peer);
     					internal_ctx->next_wait_index = wait_index;
-    					//*distance = NO_PACKET; // TODO: for effeciency: delay first packet - so it's not like RD...
-    					*target = next_peer;
-    					return OK;
+    					goto process_incoming;
     				}
     			}
     		}
@@ -80,7 +102,9 @@ int tree_next(comm_graph_t *graph, struct tree_ctx *internal_ctx,
 
     	case TREE_SEND:
     		if (send_index < dir_ptr->node_count) {
-    			*target = dir_ptr->nodes[send_index];
+    			result->bitfield = BITFIELD_FILL_AND_SEND;
+    			result->dst = dir_ptr->nodes[send_index];
+    			result->msg = TREE_MSG_DATA;
     			internal_ctx->next_send_index++;
     			return OK;
     		} else {
@@ -90,11 +114,8 @@ int tree_next(comm_graph_t *graph, struct tree_ctx *internal_ctx,
 
     	case TREE_WAIT:
     		/* Wait for bitmap to be full before distributing */
-    		if (!IS_FULL_HERE(internal_ctx->my_bitfield))
-    		{
-    			*distance = NO_PACKET;
-    			*target = -1;
-    			return OK;
+    		if (!IS_FULL_HERE(internal_ctx->my_bitfield)) {
+    			goto process_incoming;
     		}
     		break;
     	}
@@ -102,6 +123,22 @@ int tree_next(comm_graph_t *graph, struct tree_ctx *internal_ctx,
 
     /* No more packets to send - we're done here! */
     return DONE;
+
+process_incoming:
+	for (pkt_idx = 0, it = &in_queue->items[0], used = in_queue->used;
+		 (pkt_idx < in_queue->allocated) && (used > 0);
+		 pkt_idx++, it++) {
+		if (it->distance != DISTANCE_VACANT) {
+			memcpy(result, it, sizeof(*it));
+			it->distance = DISTANCE_VACANT;
+			assert(it->bitfield != BITFIELD_FILL_AND_SEND);
+			return OK;
+		}
+	}
+
+// TODO: send keep-alives!
+	result->distance = DISTANCE_NO_PACKET;
+    return OK;
 }
 
 int tree_fix(comm_graph_t *graph, struct tree_ctx *internal_ctx,

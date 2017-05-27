@@ -42,8 +42,8 @@ int butterfly_start(topology_spec_t *spec, comm_graph_t *graph,
     return OK;
 }
 
-int butterfly_next(comm_graph_t *graph, struct butterfly_ctx *internal_ctx,
-                   node_id *target, unsigned *distance)
+int butterfly_next(comm_graph_t *graph, send_list_t *in_queue,
+		           struct butterfly_ctx *internal_ctx, send_item_t *result)
 {
     node_id idx, next_peer;
 
@@ -58,8 +58,8 @@ int butterfly_next(comm_graph_t *graph, struct butterfly_ctx *internal_ctx,
     		 next_peer < internal_ctx->node_count;
     		 next_peer += internal_ctx->power)
 		if (!IS_BIT_SET_HERE(next_peer, internal_ctx->my_bitfield)) {
-			*distance = NO_PACKET;
-			*target = next_peer;
+			result->distance = DISTANCE_NO_PACKET;
+			result->dst = next_peer;
 			return OK;
 		}
 		internal_ctx->first_extra = 0;
@@ -72,15 +72,16 @@ int butterfly_next(comm_graph_t *graph, struct butterfly_ctx *internal_ctx,
     	for (idx = next_peer; idx < internal_ctx->next_child_index; idx++) {
     		next_peer = internal_ctx->my_peers->nodes[idx];
     		if (!IS_BIT_SET_HERE(next_peer, internal_ctx->my_bitfield)) {
-    	        *distance = NO_PACKET;
-    			*target = next_peer;
+    			result->distance = DISTANCE_NO_PACKET;
+    			result->dst = next_peer;
     	        return OK;
     		}
     	}
     }
 
     /* Send to the next target on the list */
-    *target = internal_ctx->my_peers->nodes[internal_ctx->next_child_index++];
+    result->dst = internal_ctx->my_peers->nodes[internal_ctx->next_child_index++];
+    result->bitfield = BITFIELD_FILL_AND_SEND;
     return OK;
 }
 

@@ -23,13 +23,10 @@ typedef enum topology_type
 
 typedef enum model_type
 {
-    COLLECTIVE_MODEL_ITERATIVE = 0, /* Basic collective */
-    COLLECTIVE_MODEL_FIXED_DELAY,   /* Fixed packet delay */
-    COLLECTIVE_MODEL_RANDOM_DELAY,  /* Random packet delay */
-    COLLECTIVE_MODEL_PACKET_DROP,   /* Random failure at times */
-    COLLECTIVE_MODEL_TIME_OFFSET,   /* Random start time offset */
+    COLLECTIVE_MODEL_BASE = 0,      /* Basic collective */
+    COLLECTIVE_MODEL_SPREAD,        /* Random start time offset */
 	COLLECTIVE_MODEL_NODES_MISSING, /* Random nodes do not take part */
-	COLLECTIVE_MODEL_NODES_FAILING, /* Radmon nodes fail online */
+	COLLECTIVE_MODEL_NODES_FAILING, /* Random nodes fail online */
     COLLECTIVE_MODEL_ALL /* default, must be last */
 } model_type_t;
 
@@ -48,9 +45,9 @@ typedef struct topology_spec
 	node_id my_rank;
 	node_id node_count;
 	unsigned char *my_bitfield;
-	unsigned death_timeout;
 	unsigned random_seed;
 	unsigned step_index; /* struct abuse in favor of optimization */
+	unsigned latency;
 
 	topology_type_t topology_type;
 	union {
@@ -65,12 +62,41 @@ typedef struct topology_spec
 
 	model_type_t model_type;
 	union {
-		unsigned packet_delay;
+		unsigned max_spread;
 		float node_fail_rate;
-		float packet_drop_rate;
-		unsigned time_offset_max;
 	} model;
 } topology_spec_t;
+
+typedef struct send_item {
+	node_id       dst;       /* packet destination */
+#define           DESTINATION_UNKNOWN ((node_id)-1)
+#define           DESTINATION_SPREAD  ((node_id)-2)
+#define           DESTINATION_DEAD    ((node_id)-3)
+	node_id       src;       /* packet source (sender) */
+	msg_type      msg;       /* packet type (per-protocol) */
+	unsigned      distance;  /* packet distance (time to be delayed in queue) */
+#define           DISTANCE_VACANT (0)
+#define           DISTANCE_NO_PACKET (0)
+#define           DISTANCE_SEND_NOW (1)
+	unsigned char *bitfield; /* pointer to the packet data */
+#define           BITFIELD_FILL_AND_SEND (NULL)
+} send_item_t;
+
+typedef struct send_list {
+	send_item_t *items;    /* List of stored items */
+	void        *data;     /* Array of stored data (matches items array) */
+	unsigned    allocated; /* Number of items allocated in memory */
+	unsigned    used;      /* Number of items used (<= allocated) */
+} send_list_t;
+
+typedef struct topology_iterator {
+	comm_graph_t *graph;        /* Pointer to the graph - changes upon node failures */
+	send_list_t  in_queue;      /* Stores incoming messages to this node */
+	unsigned     time_offset;   /* When did this node "join" the collective */
+#define          TIME_OFFSET_DEAD ((unsigned)-1)
+	unsigned     time_finished; /* When did this node "leave" the collective */
+	char         ctx[0];        /* internal context, type depends on topology */
+} topology_iterator_t;
 
 enum topology_map_slot
 {
@@ -85,32 +111,25 @@ typedef struct topo_funcs
 	size_t (*size_f)();
 	int    (*build_f)(topology_spec_t *spec, comm_graph_t **graph);
 	int    (*start_f)(topology_spec_t *spec, comm_graph_t *graph, void *internal_ctx);
-	int    (*next_f)(comm_graph_t *graph, void *internal_ctx, node_id *target, unsigned *distance);
-	int    (*fix_f)(comm_graph_t *graph, void *internal_ctx, tree_recovery_type_t method, node_id broken);
+	int    (*next_f)(comm_graph_t *graph, send_list_t *in_queue,
+			         void *internal_ctx, send_item_t *result);
+	int    (*fix_f)(comm_graph_t *graph, void *internal_ctx,
+			        tree_recovery_type_t method, node_id broken);
 } topo_funcs_t;
 
-typedef struct topology_iterator {
-	comm_graph_t *graph;
-	topology_spec_t *spec;
-	topo_funcs_t *funcs;
-	unsigned time_offset;
-	unsigned random_seed;
-	unsigned time_finished;
-	char ctx[0]; /* internal context for each iterator, type depends on topology */
-} topology_iterator_t;
+#define IS_DEAD(iterator) (iterator->time_offset == TIME_OFFSET_DEAD)
+#define SET_DEAD(iterator) ({ iterator->time_offset = TIME_OFFSET_DEAD; printf("\n\npronounced DEAD! \n\n"); })
 
 size_t topology_iterator_size();
 
-int topology_iterator_create(topology_spec_t *spec, topology_iterator_t *iterator);
+int topology_iterator_create(topology_spec_t *spec,
+		                     topo_funcs_t *funcs,
+							 topology_iterator_t *iterator);
 
-#define NO_PACKET ((unsigned)-1) /* set as distance */
-#define IS_DEAD(iterator) (iterator->time_offset == -1)
-#define SET_DEAD(iterator) ({ iterator->time_offset = -1; printf("\n\npronounced DEAD! \n\n"); })
+int topology_iterator_next(topology_spec_t *spec, topo_funcs_t *funcs,
+		                   topology_iterator_t *iterator, send_item_t *result);
 
-int topology_iterator_next(topology_iterator_t *iterator, node_id *target, unsigned *distance);
-
-int topology_iterator_omit(topology_iterator_t *iterator, tree_recovery_type_t method, node_id broken);
+int topology_iterator_omit(topology_iterator_t *iterator, topo_funcs_t *funcs,
+		                   tree_recovery_type_t method, node_id broken);
 
 void topology_iterator_destroy(topology_iterator_t *iterator);
-
-//int topology_test(collective_topology_t topology, node_id node_count);

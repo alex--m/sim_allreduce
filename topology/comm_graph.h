@@ -10,6 +10,7 @@
 #define ERROR (int)(printf("Internal error at %s, line %d.\n",__FILE__, __LINE__) && (-1))
 
 typedef unsigned long node_id;
+typedef unsigned long msg_type;
 
 enum comm_graph_direction_type {
 	COMM_GRAPH_CHILDREN = 0,  /* Children in a tree, or just next nodes in flow-like graphs */
