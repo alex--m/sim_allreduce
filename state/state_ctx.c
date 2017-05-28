@@ -35,6 +35,9 @@ int state_create(topology_spec_t *spec, state_t *old_state, state_t **new_state)
     	memset(ctx->new_matrix, 0, CTX_MATRIX_SIZE(ctx));
     	memset(ctx->old_matrix, 0, CTX_MATRIX_SIZE(ctx));
     	memset(&ctx->stats, 0, sizeof(ctx->stats));
+    	for (index = 0; index < spec->node_count; index++) {
+    		topology_iterator_destroy(GET_ITERATOR(ctx, index));
+    	}
     } else {
     	ctx = calloc(1, sizeof(*ctx));
 		if (ctx == NULL) {
@@ -114,8 +117,6 @@ static inline int state_enqueue(state_t *state, send_item_t *sent, send_list_t *
 	unsigned slot_idx = 0, slot_size = CTX_BITFIELD_SIZE(state);
 	send_item_t *item;
 
-	printf("ENQUEUE from %lu to %lu! (distance=%i)\n", sent->src, sent->dst, sent->distance);
-
 	if (sent->distance == DISTANCE_NO_PACKET) {
 		return OK;
 	}
@@ -145,6 +146,13 @@ static inline int state_enqueue(state_t *state, send_item_t *sent, send_list_t *
 			return ERROR;
 		}
 
+		/* set new slots as vacant */
+		slot_idx = list->used;
+		while (slot_idx < list->allocated) {
+			list->items[slot_idx++].distance = DISTANCE_VACANT;
+		}
+
+		/* Go to the first newly added slot */
 		slot_idx = list->used;
 	}
 
@@ -197,6 +205,7 @@ static inline int state_process(state_t *state, send_item_t *incoming, send_list
 			if (list) {
 				incoming->distance = DISTANCE_SEND_NOW;
 				state_enqueue(state, incoming, list);
+				incoming->distance = DISTANCE_VACANT;
 			} else {
 				MERGE(state, incoming->dst, incoming->bitfield);
 			}
@@ -226,7 +235,6 @@ static inline int state_dequeue(state_t *state)
 		if (item->distance) {
 			if (--item->distance == 0) {
 				topology_iterator_t *iterator = GET_ITERATOR(state, item->dst);
-				printf("DEQUEUE from %lu to %lu!\n", item->src, item->dst);
 				ret_val = state_process(state, item, &iterator->in_queue);
 				outq->used--;
 			}
@@ -273,19 +281,19 @@ int state_next_step(state_t *state)
 				} else {
 					return ret_val;
 				}
-			}
-
-			/* Handle the decision */
-			if (res.bitfield == BITFIELD_FILL_AND_SEND) {
-				/* Send this outgoing packet */
-				res.src = idx;
-				res.bitfield = GET_OLD_BITFIELD(state, idx);
-				ret_val = state_enqueue(state, &res, NULL);
-			} else if (res.distance != DISTANCE_NO_PACKET) {
-				ret_val = state_process(state, &res, NULL);
-			}
-			if (ret_val != OK) {
-				return ret_val;
+			} else {
+				/* Handle the decision */
+				if (res.bitfield == BITFIELD_FILL_AND_SEND) {
+					/* Send this outgoing packet */
+					res.src = idx;
+					res.bitfield = GET_OLD_BITFIELD(state, idx);
+					ret_val = state_enqueue(state, &res, NULL);
+				} else if (res.distance != DISTANCE_NO_PACKET) {
+					ret_val = state_process(state, &res, NULL);
+				}
+				if (ret_val != OK) {
+					return ret_val;
+				}
 			}
 		}
 
@@ -312,7 +320,6 @@ int state_next_step(state_t *state)
 		}
 	}
 
-	printf("\nACTIVE=%lu DEAD=%lu\n", active_count, dead_count);
 	return ((active_count - dead_count) > 0) ? OK : DONE;
 }
 

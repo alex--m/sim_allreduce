@@ -42,7 +42,9 @@ int sim_test_iteration(sim_spec_t *spec, raw_stats_t *stats)
 
     /* invalidate cached "old state" if the process count has changed */
     if (spec->last_node_total_size != spec->node_count) {
+    	spec->topology.node_count = spec->last_node_total_size;
         state_destroy(old_state);
+        spec->topology.node_count = spec->node_count;
         old_state = NULL;
     }
     spec->last_node_total_size = spec->node_count;
@@ -54,24 +56,20 @@ int sim_test_iteration(sim_spec_t *spec, raw_stats_t *stats)
     }
 
     spec->topology.step_index = 0;
-    if (spec->step_count)
-    {
+    if (spec->step_count) {
     	/* Run <step_count> steps */
         while ((spec->topology.step_index < spec->step_count) && (!ret_val))
         {
             ret_val = state_next_step(spec->state);
             spec->topology.step_index++;
         }
-    }
-    else
-    {
+    } else {
     	/* Run until everybody completes (unlimited) */
-        while  (ret_val == OK)
-        {
+        while (ret_val == OK) {
             ret_val = state_next_step(spec->state);
             spec->topology.step_index++;
 
-            if (spec->topology.step_index > 100) return ERROR;// TODO: remove!
+            if (spec->topology.step_index > 10000) return ERROR;// TODO: remove!
         }
     }
 
@@ -133,25 +131,39 @@ int sim_test(sim_spec_t *spec)
     }
 
     if (is_root) {
-        printf("%i,%i,%i,%i,%i,%.1f,%.1f,%i",
-               spec->node_count,
-               spec->topology.model_type,
-               spec->topology.topology_type,
-               spec->topology.topology.tree.radix,
-			   (spec->topology.model_type == COLLECTIVE_MODEL_SPREAD) ?
-			   		   spec->topology.model.max_spread : 0,
-			   (spec->topology.model_type == COLLECTIVE_MODEL_NODES_MISSING) ?
-					   spec->topology.model.node_fail_rate : 0,
-			   (spec->topology.model_type == COLLECTIVE_MODEL_NODES_FAILING) ?
-					   spec->topology.model.node_fail_rate : 0,
-			   aggregate ? spec->test_count : test_count);
-        stats_print(&spec->steps);
-        stats_print(&spec->msgs);
-        stats_print(&spec->data);
-        if (ret_val != OK) {
-        	printf(" - ERROR!");
-        }
-        printf("\n");
+    	if (spec->topology.verbose) {
+    		printf("N=%i M=%i Topo=%i Radix=%i Spread=%i Fail%%=%.1f Steps=%i\n",
+    				spec->node_count,
+					spec->topology.model_type,
+					spec->topology.topology_type,
+					spec->topology.topology.tree.radix,
+					(spec->topology.model_type == COLLECTIVE_MODEL_SPREAD) ?
+							spec->topology.model.max_spread : 0,
+					((spec->topology.model_type == COLLECTIVE_MODEL_NODES_MISSING) ||
+					 (spec->topology.model_type == COLLECTIVE_MODEL_NODES_FAILING)) ?
+							spec->topology.model.node_fail_rate : 0,
+					spec->topology.step_index);
+    	} else {
+    		printf("%i,%i,%i,%i,%i,%.1f,%.1f,%i",
+    				spec->node_count,
+					spec->topology.model_type,
+					spec->topology.topology_type,
+					spec->topology.topology.tree.radix,
+					(spec->topology.model_type == COLLECTIVE_MODEL_SPREAD) ?
+							spec->topology.model.max_spread : 0,
+					(spec->topology.model_type == COLLECTIVE_MODEL_NODES_MISSING) ?
+							spec->topology.model.node_fail_rate : 0,
+					(spec->topology.model_type == COLLECTIVE_MODEL_NODES_FAILING) ?
+							spec->topology.model.node_fail_rate : 0,
+					aggregate ? spec->test_count : test_count);
+    		stats_print(&spec->steps);
+    		stats_print(&spec->msgs);
+    		stats_print(&spec->data);
+    		if (ret_val != OK) {
+    			printf(" - ERROR!");
+    		}
+    		printf("\n");
+    	}
     }
 
     return ret_val;
@@ -469,14 +481,6 @@ int main(int argc, char **argv)
         return ERROR;
     }
 
-#ifdef TEST_FIRST
-    if (test_tree_implementation())
-    {
-        PERROR("test_tree_implementation() failed!\n");
-        return ERROR;
-    }
-#endif
-
     if (spec.mpi_rank == 0) {
         printf("Execution specification:\n"
                 "model=%i "
@@ -492,10 +496,12 @@ int main(int argc, char **argv)
 				spec.topology.latency,
                 spec.topology.random_seed);
 
-        /* CSV header */
-        printf("np,model,topo,radix,max_offset,max_delay,"
-               "fails,runs,min_steps,max_steps,steps_avg,"
-               "min_msgs,max_msgs,msgs_avg,min_data,max_data,data_avg\n");
+        if (!spec.topology.verbose) {
+        	/* CSV header */
+        	printf("np,model,topo,radix,max_offset,max_delay,"
+        			"fails,runs,min_steps,max_steps,steps_avg,"
+        			"min_msgs,max_msgs,msgs_avg,min_data,max_data,data_avg\n");
+        }
     }
 
     if (spec.node_count) {

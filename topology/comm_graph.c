@@ -112,6 +112,7 @@ void comm_graph_destroy(comm_graph_t* comm_graph)
 
 			if (direction) {
 				free(direction);
+				node->directions[direction_index] = NULL;
 			}
 		}
 	}

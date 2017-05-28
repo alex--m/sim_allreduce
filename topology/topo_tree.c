@@ -72,6 +72,7 @@ int tree_next(comm_graph_t *graph, send_list_t *in_queue,
     			memcpy(result, it, sizeof(*it));
     			it->distance = DISTANCE_VACANT;
     			assert(it->bitfield != BITFIELD_FILL_AND_SEND);
+    			in_queue->used--;
     			return OK;
     		}
     		used--;
@@ -89,7 +90,6 @@ int tree_next(comm_graph_t *graph, send_list_t *in_queue,
     				if (IS_BIT_SET_HERE(next_peer, internal_ctx->my_bitfield)) {
     					wait_index++;
     				} else {
-    					printf("waiting for %lu", next_peer);
     					internal_ctx->next_wait_index = wait_index;
     					goto process_incoming;
     				}

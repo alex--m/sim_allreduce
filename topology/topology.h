@@ -118,7 +118,7 @@ typedef struct topo_funcs
 } topo_funcs_t;
 
 #define IS_DEAD(iterator) (iterator->time_offset == TIME_OFFSET_DEAD)
-#define SET_DEAD(iterator) ({ iterator->time_offset = TIME_OFFSET_DEAD; printf("\n\npronounced DEAD! \n\n"); })
+#define SET_DEAD(iterator) ({ iterator->time_offset = TIME_OFFSET_DEAD; })
 
 size_t topology_iterator_size();
 

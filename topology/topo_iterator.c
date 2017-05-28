@@ -40,12 +40,11 @@ int topology_iterator_create(topology_spec_t *spec,
 		}
 	}
 
-	iterator->in_queue.used = 0;
-	iterator->in_queue.allocated = 0;
 	iterator->graph = current_topology;
 	iterator->time_offset =
 			(spec->model_type == COLLECTIVE_MODEL_SPREAD) ?
 			CYCLIC_RANDOM(spec, spec->model.max_spread) : 0;
+	memset(&iterator->in_queue, 0, sizeof(iterator->in_queue));
 	if ((spec->model_type == COLLECTIVE_MODEL_NODES_MISSING) &&
 		(spec->model.node_fail_rate > FLOAT_RANDOM(spec))) {
 		SET_DEAD(iterator);
@@ -70,7 +69,7 @@ int topology_iterator_next(topology_spec_t *spec, topo_funcs_t *funcs,
 	result->distance = DISTANCE_SEND_NOW + spec->latency;
 	switch (spec->model_type)
 	{
-	case COLLECTIVE_MODEL_SPREAD:
+	case COLLECTIVE_MODEL_SPREAD: // TODO: problem: need to answer KAs during spread!
         if (iterator->time_offset) {
         	iterator->time_offset--;
         	result->distance = DISTANCE_NO_PACKET;
@@ -103,7 +102,7 @@ int topology_iterator_next(topology_spec_t *spec, topo_funcs_t *funcs,
 int topology_iterator_omit(topology_iterator_t *iterator, topo_funcs_t *funcs,
 		                   tree_recovery_type_t method, node_id broken)
 {
-	if (iterator->graph && (iterator->graph == current_topology)) {
+	if (iterator->graph == current_topology) {
 		iterator->graph = comm_graph_clone(current_topology);
 	}
 
@@ -112,6 +111,13 @@ int topology_iterator_omit(topology_iterator_t *iterator, topo_funcs_t *funcs,
 
 void topology_iterator_destroy(topology_iterator_t *iterator)
 {
+	if (iterator->in_queue.allocated) {
+		free(iterator->in_queue.items);
+		iterator->in_queue.items = NULL;
+		free(iterator->in_queue.data);
+		iterator->in_queue.data = NULL;
+	}
+
 	if (iterator->graph && (iterator->graph != current_topology)) {
 		comm_graph_destroy(iterator->graph);
 	}
