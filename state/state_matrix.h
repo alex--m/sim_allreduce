@@ -38,7 +38,7 @@
 #define IS_LIVE_HERE(bitfield) _IS_BIT_SET_HERE(-1, bitfield)
 
 #define IS_BIT_SET_HERE(node_bit, bitfield) (IS_FULL_HERE(bitfield) || \
-	_IS_BIT_SET_HERE(node_bit, bitfield))
+    _IS_BIT_SET_HERE(node_bit, bitfield))
 
 #define IS_OLD_BIT_SET(ctx, local_node, node_bit) \
     IS_BIT_SET_HERE(node_bit, GET_OLD_BITFIELD(ctx, local_node))
@@ -66,45 +66,45 @@
 })
 
 #define POPCOUNT_HERE(bitfield, total_nodes) ({                               \
-	unsigned i, cnt, max = CALC_BITFIELD_SIZE(total_nodes) / sizeof(unsigned);\
-	if (IS_FULL_HERE(bitfield)) {                                             \
-		cnt = total_nodes;                                                    \
-	} else for (i = 0, cnt = 0; i < max; i++) {                               \
+    unsigned i, cnt, max = CALC_BITFIELD_SIZE(total_nodes) / sizeof(unsigned);\
+    if (IS_FULL_HERE(bitfield)) {                                             \
+        cnt = total_nodes;                                                    \
+    } else for (i = 0, cnt = 0; i < max; i++) {                               \
         cnt += __builtin_popcount(*((unsigned*)(bitfield) + i));              \
     }                                                                         \
     cnt;                                                                      \
 })
 
 #define POPCOUNT(ctx, local_node) \
-	POPCOUNT_HERE(GET_NEW_BITFIELD(ctx, local_node), ctx->spec->node_count)
+    POPCOUNT_HERE(GET_NEW_BITFIELD(ctx, local_node), ctx->spec->node_count)
 
 #define MY_POPCOUNT(ctx) POPCOUNT(ctx, ctx->my_rank)
 
 #define MERGE(ctx, local_node, addition) ({                                   \
-	if (IS_FULL_HERE(addition)) {                                             \
-		SET_FULL(ctx, local_node);                                            \
-	} else if (!IS_FULL(ctx, local_node)) {                                   \
-		unsigned i, added, in_cnt, out_cnt, mask = (unsigned)-1;              \
-		unsigned *present = (unsigned*)GET_NEW_BITFIELD(ctx, local_node);     \
-		unsigned max = CTX_BITFIELD_SIZE(ctx) / sizeof(unsigned);             \
-		                                                                      \
-		/* special treatment for first bits */                                \
-		added = *((unsigned*)addition);                                       \
-		*present |= added;                                                    \
-		((char*)&mask)[0] ^= 3; /* mask out full/live bits */                 \
-		out_cnt = __builtin_popcount(*present & mask);                        \
-		in_cnt = __builtin_popcount(added & mask);                            \
-	                                                                          \
-		for (i = 1; i < max; i++)                                             \
-		{                                                                     \
-			added = *((unsigned*)(addition) + i);                             \
-			*(present + i) |= added;                                          \
-			out_cnt += __builtin_popcount(*(present + i));                    \
-			in_cnt += __builtin_popcount(added);                              \
-		}                                                                     \
-		ctx->stats.messages_counter++;                                        \
-		ctx->stats.data_len_counter += in_cnt;                                \
-		if (out_cnt == ctx->spec->node_count) SET_FULL(ctx, local_node);      \
+    if (IS_FULL_HERE(addition)) {                                             \
+        SET_FULL(ctx, local_node);                                            \
+    } else if (!IS_FULL(ctx, local_node)) {                                   \
+        unsigned i, added, in_cnt, out_cnt, mask = (unsigned)-1;              \
+        unsigned *present = (unsigned*)GET_NEW_BITFIELD(ctx, local_node);     \
+        unsigned max = CTX_BITFIELD_SIZE(ctx) / sizeof(unsigned);             \
+                                                                              \
+        /* special treatment for first bits */                                \
+        added = *((unsigned*)addition);                                       \
+        *present |= added;                                                    \
+        ((char*)&mask)[0] ^= 3; /* mask out full/live bits */                 \
+        out_cnt = __builtin_popcount(*present & mask);                        \
+        in_cnt = __builtin_popcount(added & mask);                            \
+                                                                              \
+        for (i = 1; i < max; i++)                                             \
+        {                                                                     \
+            added = *((unsigned*)(addition) + i);                             \
+            *(present + i) |= added;                                          \
+            out_cnt += __builtin_popcount(*(present + i));                    \
+            in_cnt += __builtin_popcount(added);                              \
+        }                                                                     \
+        ctx->stats.messages_counter++;                                        \
+        ctx->stats.data_len_counter += in_cnt;                                \
+        if (out_cnt == ctx->spec->node_count) SET_FULL(ctx, local_node);      \
     }                                                                         \
 })
 
@@ -113,9 +113,9 @@
 
 #define PRINT(ctx, local_node) ({                                             \
     int i;                                                                    \
-	for (i = 0; i < (ctx)->spec->node_count; i++) {                           \
-		printf("%i", IS_OLD_BIT_SET((ctx), local_node, i));                   \
-	}                                                                         \
+    for (i = 0; i < (ctx)->spec->node_count; i++) {                           \
+        printf("%i", IS_OLD_BIT_SET((ctx), local_node, i));                   \
+    }                                                                         \
     printf(" (is_full=%i)", IS_FULL((ctx), local_node));                      \
     printf(" (is_live=%i)", IS_LIVE((ctx), local_node));                      \
 })

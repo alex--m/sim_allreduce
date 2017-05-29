@@ -12,9 +12,9 @@ typedef struct stats {
 } stats_t;
 
 typedef struct raw_stats {
-	unsigned long step_counter;
-	unsigned long messages_counter;
-	unsigned long data_len_counter;
+    unsigned long step_counter;
+    unsigned long messages_counter;
+    unsigned long data_len_counter;
 } raw_stats_t;
 
 void stats_calc(struct stats *stats, unsigned long value, int is_root, MPI_Comm comm);
