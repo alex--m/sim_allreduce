@@ -31,6 +31,9 @@ int state_create(topology_spec_t *spec, state_t *old_state, state_t **new_state)
     if (old_state) {
         ctx = old_state;
         ctx->outq.used = 0;
+        for (index = 0; index < ctx->outq.allocated; index++) {
+        	ctx->outq.items[index].distance = DISTANCE_VACANT;
+        }
         memset(ctx->new_matrix, 0, CTX_MATRIX_SIZE(ctx));
         memset(ctx->old_matrix, 0, CTX_MATRIX_SIZE(ctx));
         memset(&ctx->stats, 0, sizeof(ctx->stats));
@@ -153,14 +156,10 @@ static inline int state_enqueue(state_t *state, send_item_t *sent, send_list_t *
         }
 
         /* Reset bitfield pointers to data */
-        if ((list->used == 0) || (list->items[0].bitfield != list->data)) {
-            for (slot_idx = 0; slot_idx < list->used; slot_idx++) {
-                list->items[slot_idx].bitfield =
-                        list->data + (slot_idx * slot_size);
-            }
-        } else {
-            slot_idx = list->used;
-        }
+		for (slot_idx = 0; slot_idx < list->used; slot_idx++) {
+			list->items[slot_idx].bitfield =
+					list->data + (slot_idx * slot_size);
+		}
 
         /* set new slots as vacant */
         for (; slot_idx < list->allocated; slot_idx++) {
@@ -295,18 +294,20 @@ int state_next_step(state_t *state)
                     return ret_val;
                 }
             } else {
-                /* Handle the decision */
-                if (res.bitfield == BITFIELD_FILL_AND_SEND) {
-                    /* Send this outgoing packet */
-                    res.src = idx;
-                    res.bitfield = GET_OLD_BITFIELD(state, idx);
-                    ret_val = state_enqueue(state, &res, NULL);
-                } else if (res.distance != DISTANCE_NO_PACKET) {
-                    ret_val = state_process(state, &res, NULL);
-                }
-                if (ret_val != OK) {
-                    return ret_val;
-                }
+            	/* Handle the decision */
+            	if (res.distance != DISTANCE_NO_PACKET) {
+            		if (res.bitfield == BITFIELD_FILL_AND_SEND) {
+            			/* Send this outgoing packet */
+            			res.src = idx;
+            			res.bitfield = GET_OLD_BITFIELD(state, idx);
+            			ret_val = state_enqueue(state, &res, NULL);
+            		} else {
+            			ret_val = state_process(state, &res, NULL);
+            		}
+            		if (ret_val != OK) {
+            			return ret_val;
+            		}
+            	}
             }
         }
 
@@ -318,13 +319,17 @@ int state_next_step(state_t *state)
             printf("\nproc=%3lu popcount:%3u\t", idx, POPCOUNT(state, idx));
             PRINT(state, idx);
             if (ret_val == DONE) {
-                printf(" - Done!");
+            	printf(" - Done!");
             } else if (res.distance != DISTANCE_NO_PACKET) {
-                printf(" - sends to #%lu", res.dst);
+            	if (res.dst == idx) {
+            		printf(" - accepts from #%lu (type=%lu)", res.src, res.msg);
+            	} else {
+            		printf(" - sends to #%lu", res.dst);
+            	}
             } else if (res.dst == DESTINATION_UNKNOWN) {
-                printf(" - waits for somebody (bitfield incomplete)");
+            	printf(" - waits for somebody (bitfield incomplete)");
             } else if (res.dst == DESTINATION_SPREAD) {
-                printf(" - pending (spread)");
+            	printf(" - pending (spread)");
             } else if (res.dst == DESTINATION_DEAD) {
                 printf(" - DEAD");
             } else {
@@ -361,11 +366,11 @@ void state_destroy(state_t *state)
         free(state->procs);
     }
 
-    if (state->outq.items) {
+    if (state->outq.allocated) {
         free(state->outq.items);
-    }
-    if (state->outq.data) {
         free(state->outq.data);
+        state->outq.allocated = 0;
+        state->outq.used = 0;
     }
     if (state->old_matrix) {
         free(state->old_matrix);

@@ -68,7 +68,7 @@ int butterfly_next(comm_graph_t *graph, send_list_t *in_queue,
     /* Check if I'm the extra */
     if (internal_ctx->extra_count == EXTRA_IS_ME) {
         /* Send to my father */
-        if (internal_ctx->next_child_index < internal_ctx->extra_count) {
+        if (internal_ctx->next_child_index < internal_ctx->my_peers->node_count) {
             next_peer = internal_ctx->next_child_index++;
             next_peer = internal_ctx->my_peers->nodes[next_peer];
             result->bitfield = BITFIELD_FILL_AND_SEND;
@@ -78,9 +78,9 @@ int butterfly_next(comm_graph_t *graph, send_list_t *in_queue,
         }
 
         /* Expect results */
-        while (internal_ctx->next_child_index < 2 * internal_ctx->extra_count) {
+        while (internal_ctx->next_child_index < 2 * internal_ctx->my_peers->node_count) {
             next_peer = internal_ctx->next_child_index;
-            next_peer -= internal_ctx->extra_count;
+            next_peer -= internal_ctx->my_peers->node_count;
             next_peer = internal_ctx->my_peers->nodes[next_peer];
             if (IS_BIT_SET_HERE(next_peer, internal_ctx->my_bitfield)) {
                 internal_ctx->next_child_index++;
@@ -90,12 +90,6 @@ int butterfly_next(comm_graph_t *graph, send_list_t *in_queue,
                 goto process_incoming;
             }
         }
-        return DONE;
-    }
-
-    /* Check for completion */
-    if (internal_ctx->next_child_index >= internal_ctx->my_peers->node_count +
-            internal_ctx->extra_count) {
         return DONE;
     }
 
@@ -115,9 +109,9 @@ int butterfly_next(comm_graph_t *graph, send_list_t *in_queue,
     }
 
     /* Wait for this level before ascending to the next level */
-    if ((internal_ctx->next_child_index > internal_ctx->extra_count) &&
-        (((internal_ctx->next_child_index - internal_ctx->extra_count) %
-           internal_ctx->check_interval) == 0)) {
+    if ((internal_ctx->next_child_index >= internal_ctx->extra_count + internal_ctx->check_interval) &&
+        (internal_ctx->next_child_index <= internal_ctx->my_peers->node_count) &&
+        (((internal_ctx->next_child_index - internal_ctx->extra_count) % internal_ctx->check_interval) == 0)) {
         for (offset = internal_ctx->check_interval;
              offset > 0;
              offset--) {
@@ -128,6 +122,12 @@ int butterfly_next(comm_graph_t *graph, send_list_t *in_queue,
                 goto process_incoming;
             }
         }
+    }
+
+    /* Check for completion */
+    if (internal_ctx->next_child_index >= internal_ctx->my_peers->node_count +
+            internal_ctx->extra_count) {
+        return DONE;
     }
 
     /* Send to the next target on the list */
@@ -203,7 +203,6 @@ int butterfly_build(topology_spec_t *spec, comm_graph_t **graph)
                 COMM_GRAPH_CHILDREN);
         comm_graph_append(*graph, next_id % max_group_size, next_id,
                 COMM_GRAPH_CHILDREN);
-        printf("LINK %lu <> %lu\n", next_id, next_id % max_group_size);
     }
 
     for (jump_size = 1, group_size = radix;
@@ -214,7 +213,6 @@ int butterfly_build(topology_spec_t *spec, comm_graph_t **graph)
                 node_id group_start = next_id - (next_id % group_size);
                 node_id next_son = group_start + (((next_id - group_start) +
                         (jump_size * jump)) % group_size);
-                printf("APPEEND %lu -> %lu\n", next_id, next_son);
                 comm_graph_append(*graph, next_id, next_son, COMM_GRAPH_CHILDREN);
             }
         }

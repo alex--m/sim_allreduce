@@ -41,8 +41,6 @@ int topology_iterator_create(topology_spec_t *spec,
     }
 
     iterator->graph = current_topology;
-    iterator->in_queue.allocated = 0;
-    iterator->in_queue.used = 0;
     iterator->time_finished = 0;
     iterator->time_offset =
             (spec->model_type == COLLECTIVE_MODEL_SPREAD) ?
@@ -121,6 +119,7 @@ void topology_iterator_destroy(topology_iterator_t *iterator)
         iterator->in_queue.items = NULL;
         free(iterator->in_queue.data);
         iterator->in_queue.data = NULL;
+        iterator->in_queue.allocated = 0;
     }
 
     if (iterator->graph && (iterator->graph != current_topology)) {

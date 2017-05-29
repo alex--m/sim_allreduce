@@ -17,11 +17,11 @@ typedef struct raw_stats {
     unsigned long data_len_counter;
 } raw_stats_t;
 
-inline void stats_calc(struct stats *stats, unsigned long value);
+void stats_calc(struct stats *stats, unsigned long value);
 
-inline void stats_aggregate(struct stats *stats, int is_root, MPI_Comm comm);
+void stats_aggregate(struct stats *stats, int is_root, MPI_Comm comm);
 
-inline void stats_print(struct stats *stats);
+void stats_print(struct stats *stats);
 
 /* Create initial state for num_procs local, for a total of num_peer symetrical states */
 int state_create(topology_spec_t *spec,

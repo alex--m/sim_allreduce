@@ -10,7 +10,7 @@ static inline void stats_reduce_ulong(unsigned long *ptr, int is_root, MPI_Op op
     }
 }
 
-inline void stats_calc(struct stats *stats, unsigned long value)
+void stats_calc(struct stats *stats, unsigned long value)
 {
     stats->sum += value;
     stats->cnt++;
@@ -24,7 +24,7 @@ inline void stats_calc(struct stats *stats, unsigned long value)
     }
 }
 
-inline void stats_aggregate(struct stats *stats, int is_root, MPI_Comm comm)
+void stats_aggregate(struct stats *stats, int is_root, MPI_Comm comm)
 {
     if ((!is_root) && (stats->min == 0)) {
         stats->min = (unsigned long)-1;
@@ -36,7 +36,7 @@ inline void stats_aggregate(struct stats *stats, int is_root, MPI_Comm comm)
     stats_reduce_ulong(&stats->max, is_root, MPI_MAX, comm);
 }
 
-inline void stats_print(struct stats *stats)
+void stats_print(struct stats *stats)
 {
     stats->avg = stats->sum / stats->cnt;
     printf(",%lu,%lu,%.2f", stats->min, stats->max, stats->avg);
