@@ -77,31 +77,29 @@ int sim_test_iteration(sim_spec_t *spec, raw_stats_t *stats)
         return ERROR;
     }
 
-    ret_val = state_get_raw_stats(spec->state, stats);
-    stats->step_counter = (unsigned long)spec->topology.step_index;
-    return ret_val;
+    return state_get_raw_stats(spec->state, stats);
 }
 
 int sim_test(sim_spec_t *spec)
 {
     int ret_val = OK;
-    int aggregate = 1;
     raw_stats_t raw = {0};
-    unsigned test_index = 0;
-    unsigned test_count = spec->test_count;
+    unsigned test_index;
+    unsigned my_test_count;
+    unsigned total_test_count = spec->test_count;
     int is_root = (spec->mpi_rank == 0);
 
     /* no need to collect statistics on deterministic algorithms */
     if (spec->topology.model_type == COLLECTIVE_MODEL_BASE) {
-            test_count = 1;
+        total_test_count = 1;
     }
 
     /* Distribute tests among processes */
     if (is_root) {
-        test_count = (test_count / spec->mpi_size) +
-                (test_count % spec->mpi_size);
+        my_test_count = (total_test_count / spec->mpi_size) +
+                (total_test_count % spec->mpi_size);
     } else {
-        test_count /= spec->mpi_size;
+        my_test_count = total_test_count / spec->mpi_size;
     }
 
     /* Prepare for subsequent test iterations */
@@ -110,17 +108,17 @@ int sim_test(sim_spec_t *spec)
     memset(&spec->msgs, 0, sizeof(stats_t));
     memset(&spec->data, 0, sizeof(stats_t));
 
-    while ((test_index < test_count) && (ret_val == OK))
+    for (test_index = 0;
+         ((test_index < my_test_count) && (ret_val == OK));
+         test_index++)
     {
         /* Run the a single iteration (independent) of the test */
         ret_val = sim_test_iteration(spec, &raw);
 
         /* Collect statistics */
-        stats_calc(&spec->steps, raw.step_counter, is_root, MPI_COMM_WORLD);
-        stats_calc(&spec->msgs, raw.messages_counter, is_root, MPI_COMM_WORLD);
-        stats_calc(&spec->data, raw.data_len_counter, is_root, MPI_COMM_WORLD);
-
-        test_index++;
+        stats_calc(&spec->steps, raw.step_counter);
+        stats_calc(&spec->msgs, raw.messages_counter);
+        stats_calc(&spec->data, raw.data_len_counter);
     }
 
     /* If multiple tests were done on multiple processes - aggregate */
@@ -132,7 +130,7 @@ int sim_test(sim_spec_t *spec)
 
     if (is_root) {
         if (spec->topology.verbose) {
-            printf("N=%i M=%i Topo=%i Radix=%i Spread=%i Fail%%=%.1f Steps=%i\n",
+            printf("N=%i M=%i Topo=%i Radix=%i Spread=%i Fail%%=%.1f Steps(Avg.)=%lu\n",
                     spec->node_count,
                     spec->topology.model_type,
                     spec->topology.topology_type,
@@ -142,7 +140,7 @@ int sim_test(sim_spec_t *spec)
                     ((spec->topology.model_type == COLLECTIVE_MODEL_NODES_MISSING) ||
                      (spec->topology.model_type == COLLECTIVE_MODEL_NODES_FAILING)) ?
                             spec->topology.model.node_fail_rate : 0,
-                    spec->topology.step_index);
+                    spec->steps.sum / spec->steps.cnt);
         } else {
             printf("%i,%i,%i,%i,%i,%.1f,%.1f,%i",
                     spec->node_count,
@@ -155,7 +153,7 @@ int sim_test(sim_spec_t *spec)
                             spec->topology.model.node_fail_rate : 0,
                     (spec->topology.model_type == COLLECTIVE_MODEL_NODES_FAILING) ?
                             spec->topology.model.node_fail_rate : 0,
-                    aggregate ? spec->test_count : test_count);
+                            total_test_count);
             stats_print(&spec->steps);
             stats_print(&spec->msgs);
             stats_print(&spec->data);
@@ -205,7 +203,9 @@ int sim_coll_radix_topology(sim_spec_t *spec)
     }
 
     for (radix = 2;
-         ((radix < 10) && (radix <= spec->node_count) && (ret_val == OK));
+         ((radix < spec->topology.latency + 1) &&
+          (radix <= spec->node_count) &&
+          (ret_val == OK));
          radix++) {
         if (spec->topology.topology_type < COLLECTIVE_TOPOLOGY_RECURSIVE_K_ING) {
             spec->topology.topology.tree.radix = radix;
@@ -488,8 +488,8 @@ int main(int argc, char **argv)
                 "step_count=%i "
                 "test_count=%i "
                 "tree_radix=%i "
-                "latency=%i"
-                "random_seed=%i\n",
+                "latency=%i "
+                "random-seed=%i\n",
                 spec.topology.model_type, spec.topology.topology_type,
                 spec.step_count, spec.test_count,
                 spec.topology.topology.tree.radix,

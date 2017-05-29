@@ -41,6 +41,9 @@ int topology_iterator_create(topology_spec_t *spec,
     }
 
     iterator->graph = current_topology;
+    iterator->in_queue.allocated = 0;
+    iterator->in_queue.used = 0;
+    iterator->time_finished = 0;
     iterator->time_offset =
             (spec->model_type == COLLECTIVE_MODEL_SPREAD) ?
             CYCLIC_RANDOM(spec, spec->model.max_spread) : 0;
@@ -48,6 +51,7 @@ int topology_iterator_create(topology_spec_t *spec,
     if ((spec->model_type == COLLECTIVE_MODEL_NODES_MISSING) &&
         (spec->model.node_fail_rate > FLOAT_RANDOM(spec))) {
         SET_DEAD(iterator);
+        return DEAD;
     }
 
     ret_val = comm_graph_append(current_topology, spec->my_rank,
@@ -81,6 +85,7 @@ int topology_iterator_next(topology_spec_t *spec, topo_funcs_t *funcs,
     case COLLECTIVE_MODEL_NODES_FAILING:
         if (spec->model.node_fail_rate > FLOAT_RANDOM(spec)) {
             SET_DEAD(iterator);
+            return DEAD;
         }
         /* Intentionally no break */
 

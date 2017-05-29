@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <assert.h>
 #include "state.h"
 #include "state_matrix.h"
 
@@ -26,7 +27,6 @@ int state_create(topology_spec_t *spec, state_t *old_state, state_t **new_state)
 {
     state_t *ctx;
     int index, ret_val;
-    enum topology_map_slot map_slot;
 
     if (old_state) {
         ctx = old_state;
@@ -43,25 +43,7 @@ int state_create(topology_spec_t *spec, state_t *old_state, state_t **new_state)
             return ERROR;
         }
 
-        /* Select and copy the function pointers for the requested topology */
-        switch (spec->topology_type) {
-        case COLLECTIVE_TOPOLOGY_NARRAY_TREE:
-        case COLLECTIVE_TOPOLOGY_KNOMIAL_TREE:
-        case COLLECTIVE_TOPOLOGY_NARRAY_MULTIROOT_TREE:
-        case COLLECTIVE_TOPOLOGY_KNOMIAL_MULTIROOT_TREE:
-            map_slot = TREE;
-            break;
-
-        case COLLECTIVE_TOPOLOGY_RECURSIVE_K_ING:
-            map_slot = BUTTERFLY;
-            break;
-
-        case COLLECTIVE_TOPOLOGY_ALL:
-            return ERROR;
-        }
-
         ctx->spec = spec;
-        ctx->funcs = &topo_map[map_slot];
         ctx->per_proc_size = topology_iterator_size();
         CTX_BITFIELD_SIZE(ctx) = CALC_BITFIELD_SIZE(spec->node_count);
 
@@ -87,6 +69,23 @@ int state_create(topology_spec_t *spec, state_t *old_state, state_t **new_state)
         }
     }
 
+    /* Select and copy the function pointers for the requested topology */
+    switch (spec->topology_type) {
+    case COLLECTIVE_TOPOLOGY_NARRAY_TREE:
+    case COLLECTIVE_TOPOLOGY_KNOMIAL_TREE:
+    case COLLECTIVE_TOPOLOGY_NARRAY_MULTIROOT_TREE:
+    case COLLECTIVE_TOPOLOGY_KNOMIAL_MULTIROOT_TREE:
+        ctx->funcs = &topo_map[TREE];
+        break;
+
+    case COLLECTIVE_TOPOLOGY_RECURSIVE_K_ING:
+        ctx->funcs = &topo_map[BUTTERFLY];
+        break;
+
+    case COLLECTIVE_TOPOLOGY_ALL:
+        return ERROR;
+    }
+
     for (index = 0; index < spec->node_count; index++) {
         topology_iterator_t *it = GET_ITERATOR(ctx, index);
 
@@ -98,11 +97,14 @@ int state_create(topology_spec_t *spec, state_t *old_state, state_t **new_state)
         /* initialize the iterators over the topology requested */
         ret_val = topology_iterator_create(spec, ctx->funcs, it);
         if (ret_val != OK) {
-            state_destroy(ctx);
-            return ret_val;
-        }
-
-        if (!IS_DEAD(it)) {
+            if (ret_val == DEAD) {
+                printf("\nREAL-DEAD!\n");
+                UNSET_LIVE(ctx, index);
+            } else {
+                state_destroy(ctx);
+                return ret_val;
+            }
+        } else {
             SET_LIVE(ctx, index);
         }
     }
@@ -122,6 +124,11 @@ static inline int state_enqueue(state_t *state, send_item_t *sent, send_list_t *
 
     if (list == NULL) {
         list = &state->outq;
+        if (IS_LIVE_HERE(sent->bitfield)) {
+            state->stats.data_len_counter += POPCOUNT_HERE(sent->bitfield,
+                    state->spec->node_count);
+            state->stats.messages_counter++;
+        }
     }
 
     /* make sure chuck has free slots */
@@ -145,32 +152,37 @@ static inline int state_enqueue(state_t *state, send_item_t *sent, send_list_t *
             return ERROR;
         }
 
+        /* Reset bitfield pointers to data */
+        if ((list->used == 0) || (list->items[0].bitfield != list->data)) {
+            for (slot_idx = 0; slot_idx < list->used; slot_idx++) {
+                list->items[slot_idx].bitfield =
+                        list->data + (slot_idx * slot_size);
+            }
+        } else {
+            slot_idx = list->used;
+        }
+
         /* set new slots as vacant */
-        slot_idx = list->used;
-        while (slot_idx < list->allocated) {
-            list->items[slot_idx++].distance = DISTANCE_VACANT;
+        for (; slot_idx < list->allocated; slot_idx++) {
+            list->items[slot_idx].distance = DISTANCE_VACANT;
+            list->items[slot_idx].bitfield =
+                    list->data + (slot_idx * slot_size);
         }
 
         /* Go to the first newly added slot */
         slot_idx = list->used;
-    }
-
-    /* find next slot available */
-    while (list->items[slot_idx].distance) {
-        slot_idx++;
+    } else {
+        /* find next slot available */
+        while (list->items[slot_idx].distance != DISTANCE_VACANT) {
+            slot_idx++;
+        }
+        assert(slot_idx < list->allocated);
     }
 
     /* fill the slot with the packet to be sent later */
     item = &list->items[slot_idx];
     memcpy(item, sent, offsetof(send_item_t, bitfield));
-    if (sent->bitfield) {
-        item->bitfield = list->data + (slot_idx * slot_size);
-        memcpy(item->bitfield, sent->bitfield, state->bitfield_size);
-        state->stats.data_len_counter += POPCOUNT_HERE(item->bitfield,
-                state->spec->node_count);
-    }
-
-    state->stats.messages_counter++;
+    memcpy(item->bitfield, sent->bitfield, slot_size);
     list->used++;
     return OK;
 }
@@ -180,7 +192,7 @@ static inline int state_notify_dead(state_t *state, node_id dead, node_id target
     send_item_t death = {
             .dst = target,
             .src = dead,
-            .bitfield = NULL
+            .bitfield = GET_OLD_BITFIELD(state, dead) // Never actually merged!
     };
 
     death.distance = 2 * state->spec->topology.tree.radix; // TODO: calc_timeout();
@@ -277,6 +289,8 @@ int state_next_step(state_t *state)
                         iterator->time_finished = state->spec->step_index;
                     }
                     active_count--;
+                } else if (ret_val == DEAD) {
+                    UNSET_LIVE(state, idx);
                 } else {
                     return ret_val;
                 }
@@ -303,10 +317,10 @@ int state_next_step(state_t *state)
             }
             printf("\nproc=%3lu popcount:%3u\t", idx, POPCOUNT(state, idx));
             PRINT(state, idx);
-            if (res.distance != DISTANCE_NO_PACKET) {
-                printf(" - sends to #%lu", res.dst);
-            } else if (ret_val == DONE) {
+            if (ret_val == DONE) {
                 printf(" - Done!");
+            } else if (res.distance != DISTANCE_NO_PACKET) {
+                printf(" - sends to #%lu", res.dst);
             } else if (res.dst == DESTINATION_UNKNOWN) {
                 printf(" - waits for somebody (bitfield incomplete)");
             } else if (res.dst == DESTINATION_SPREAD) {
@@ -319,7 +333,11 @@ int state_next_step(state_t *state)
         }
     }
 
-    return ((active_count - dead_count) > 0) ? OK : DONE;
+    if ((active_count - dead_count) == 0) {
+        state->stats.step_counter = state->spec->step_index;
+        return DONE;
+    }
+    return OK;
 }
 
 int state_get_raw_stats(state_t *state, raw_stats_t *stats)

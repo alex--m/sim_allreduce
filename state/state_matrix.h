@@ -22,12 +22,12 @@
     ((local_node) * CTX_BITFIELD_SIZE(ctx)))
 
 #define SET_OLD_BIT(ctx, local_node, node_bit) \
-    *(GET_OLD_BITFIELD(ctx, local_node) + ((node_bit + 2) >> 3)) |= \
-        (1 << ((node_bit + 2) & 7))
+    *(GET_OLD_BITFIELD(ctx, local_node) + (((node_bit) + 2) >> 3)) |= \
+        (1 << (((node_bit) + 2) & 7))
 
 #define SET_NEW_BIT(ctx, local_node, node_bit) \
-    *(GET_NEW_BITFIELD(ctx, local_node) + ((node_bit + 2) >> 3)) |= \
-        (1 << ((node_bit + 2) & 7))
+    *(GET_NEW_BITFIELD(ctx, local_node) + (((node_bit) + 2) >> 3)) |= \
+        (1 << (((node_bit) + 2) & 7))
 
 #define _IS_BIT_SET_HERE(node_bit, bitfield) \
     ((*((bitfield) + (((node_bit) + 2) >> 3)) & \
@@ -52,6 +52,9 @@
 
 #define SET_LIVE(ctx, local_node) SET_NEW_BIT(ctx, local_node, -1)
 
+#define UNSET_LIVE(ctx, local_node) \
+    memset(GET_NEW_BITFIELD(ctx, local_node), 0, CTX_BITFIELD_SIZE(ctx))
+
 #define IS_LIVE(ctx, local_node) IS_NEW_BIT_SET(ctx, local_node, -1)
 
 #define IS_MINE_FULL(ctx) IS_FULL((ctx), ctx->my_rank)
@@ -72,7 +75,7 @@
     } else for (i = 0, cnt = 0; i < max; i++) {                               \
         cnt += __builtin_popcount(*((unsigned*)(bitfield) + i));              \
     }                                                                         \
-    cnt;                                                                      \
+    cnt - 1; /* Assume IS_LIVE */                                             \
 })
 
 #define POPCOUNT(ctx, local_node) \
@@ -102,8 +105,6 @@
             out_cnt += __builtin_popcount(*(present + i));                    \
             in_cnt += __builtin_popcount(added);                              \
         }                                                                     \
-        ctx->stats.messages_counter++;                                        \
-        ctx->stats.data_len_counter += in_cnt;                                \
         if (out_cnt == ctx->spec->node_count) SET_FULL(ctx, local_node);      \
     }                                                                         \
 })

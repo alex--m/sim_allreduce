@@ -83,10 +83,10 @@ typedef struct send_item {
 } send_item_t;
 
 typedef struct send_list {
-    send_item_t *items;    /* List of stored items */
-    void        *data;     /* Array of stored data (matches items array) */
-    unsigned    allocated; /* Number of items allocated in memory */
-    unsigned    used;      /* Number of items used (<= allocated) */
+    send_item_t   *items;    /* List of stored items */
+    unsigned char *data;     /* Array of stored data (matches items array) */
+    unsigned      allocated; /* Number of items allocated in memory */
+    unsigned      used;      /* Number of items used (<= allocated) */
 } send_list_t;
 
 typedef struct topology_iterator {
@@ -98,8 +98,7 @@ typedef struct topology_iterator {
     char         ctx[0];        /* internal context, type depends on topology */
 } topology_iterator_t;
 
-enum topology_map_slot
-{
+enum topology_map_slot {
     TREE = 0,
     BUTTERFLY,
 
@@ -133,3 +132,25 @@ int topology_iterator_omit(topology_iterator_t *iterator, topo_funcs_t *funcs,
                            tree_recovery_type_t method, node_id broken);
 
 void topology_iterator_destroy(topology_iterator_t *iterator);
+
+static inline int queue_check_msg(send_list_t *in_queue,
+                                  msg_type max_msg,
+                                  send_item_t *result)
+{
+    send_item_t *it;
+    unsigned pkt_idx, used;
+    for (pkt_idx = 0, it = &in_queue->items[0], used = in_queue->used;
+         (pkt_idx < in_queue->allocated) && (used > 0);
+         pkt_idx++, it++) {
+        if (it->distance != DISTANCE_VACANT) {
+            if (it->msg <= max_msg) {
+                memcpy(result, it, sizeof(*it));
+                it->distance = DISTANCE_VACANT;
+                in_queue->used--;
+                return 1;
+            }
+            used--;
+        }
+    }
+    return 0;
+}

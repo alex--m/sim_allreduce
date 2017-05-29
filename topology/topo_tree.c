@@ -15,6 +15,7 @@ enum tree_msg_type {
     TREE_MSG_FATHER_KEEPALIVE,
     TREE_MSG_SON_DONE,
     TREE_MSG_FATHER_DONE,
+    TREE_MSG_LAST
 };
 
 enum tree_action {
@@ -46,9 +47,8 @@ int tree_start(topology_spec_t *spec, comm_graph_t *graph,
 int tree_next(comm_graph_t *graph, send_list_t *in_queue,
               struct tree_ctx *internal_ctx, send_item_t *result)
 {
-    send_item_t *it;
     node_id next_peer;
-    unsigned order_idx, pkt_idx, used;
+    unsigned order_idx;
     unsigned wait_index = internal_ctx->next_wait_index;
     unsigned send_index = internal_ctx->next_send_index;
     comm_graph_node_t *my_node = &graph->nodes[internal_ctx->my_node];
@@ -64,19 +64,8 @@ int tree_next(comm_graph_t *graph, send_list_t *in_queue,
             {COMM_GRAPH_EXTRA_CHILDREN, TREE_SEND}
     };
 
-    for (pkt_idx = 0, it = &in_queue->items[0], used = in_queue->used;
-         (pkt_idx < in_queue->allocated) && (used > 0);
-         pkt_idx++, it++) {
-        if (it->distance != DISTANCE_VACANT) {
-            if (it->msg == TREE_MSG_DATA) {
-                memcpy(result, it, sizeof(*it));
-                it->distance = DISTANCE_VACANT;
-                assert(it->bitfield != BITFIELD_FILL_AND_SEND);
-                in_queue->used--;
-                return OK;
-            }
-            used--;
-        }
+    if (queue_check_msg(in_queue, TREE_MSG_DATA, result)) {
+        return OK;
     }
 
     for (order_idx = 0; order_idx < (sizeof(tree_order) / sizeof(*tree_order)); order_idx++) {
@@ -125,15 +114,8 @@ int tree_next(comm_graph_t *graph, send_list_t *in_queue,
     return DONE;
 
 process_incoming:
-    for (pkt_idx = 0, it = &in_queue->items[0], used = in_queue->used;
-         (pkt_idx < in_queue->allocated) && (used > 0);
-         pkt_idx++, it++) {
-        if (it->distance != DISTANCE_VACANT) {
-            memcpy(result, it, sizeof(*it));
-            it->distance = DISTANCE_VACANT;
-            assert(it->bitfield != BITFIELD_FILL_AND_SEND);
-            return OK;
-        }
+    if (queue_check_msg(in_queue, TREE_MSG_LAST, result)) {
+        return OK;
     }
 
 // TODO: send keep-alives!
