@@ -46,8 +46,8 @@ typedef struct topology_spec
     node_id node_count;
     unsigned char *my_bitfield;
     unsigned random_seed;
-    unsigned step_index; /* struct abuse in favor of optimization */
-    unsigned latency;
+    step_num step_index; /* struct abuse in favor of optimization */
+    step_num latency;
 
     topology_type_t topology_type;
     union {
@@ -62,7 +62,7 @@ typedef struct topology_spec
 
     model_type_t model_type;
     union {
-        unsigned max_spread;
+    	step_num max_spread;
         float node_fail_rate;
     } model;
 } topology_spec_t;
@@ -74,10 +74,11 @@ typedef struct send_item {
 #define           DESTINATION_DEAD    ((node_id)-3)
     node_id       src;       /* packet source (sender) */
     msg_type      msg;       /* packet type (per-protocol) */
-    unsigned      distance;  /* packet distance (time to be delayed in queue) */
+    step_num      distance;  /* packet distance (time to be delayed in queue) */
 #define           DISTANCE_VACANT (0)
 #define           DISTANCE_NO_PACKET (0)
 #define           DISTANCE_SEND_NOW (1)
+    step_num      timeout;   /* packet timeout (after which consider peer dead) */
     unsigned char *bitfield; /* pointer to the packet data */
 #define           BITFIELD_FILL_AND_SEND (NULL)
 } send_item_t;
@@ -92,9 +93,9 @@ typedef struct send_list {
 typedef struct topology_iterator {
     comm_graph_t *graph;        /* Pointer to the graph - changes upon node failures */
     send_list_t  in_queue;      /* Stores incoming messages to this node */
-    unsigned     time_offset;   /* When did this node "join" the collective */
+    step_num     time_offset;   /* When did this node "join" the collective */
 #define          TIME_OFFSET_DEAD ((unsigned)-1)
-    unsigned     time_finished; /* When did this node "leave" the collective */
+    step_num     time_finished; /* When did this node "leave" the collective */
     char         ctx[0];        /* internal context, type depends on topology */
 } topology_iterator_t;
 
@@ -134,7 +135,7 @@ int topology_iterator_omit(topology_iterator_t *iterator, topo_funcs_t *funcs,
 void topology_iterator_destroy(topology_iterator_t *iterator);
 
 static inline int queue_check_msg(send_list_t *in_queue,
-                                  msg_type max_msg,
+                                  msg_type msg,
                                   send_item_t *result)
 {
     send_item_t *it;
@@ -143,7 +144,7 @@ static inline int queue_check_msg(send_list_t *in_queue,
          (pkt_idx < in_queue->allocated) && (used > 0);
          pkt_idx++, it++) {
         if (it->distance != DISTANCE_VACANT) {
-            if (it->msg <= max_msg) {
+            if (it->msg == msg) {
                 memcpy(result, it, sizeof(*it));
                 it->distance = DISTANCE_VACANT;
                 in_queue->used--;

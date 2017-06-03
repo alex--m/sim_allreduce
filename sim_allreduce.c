@@ -203,7 +203,7 @@ int sim_coll_radix_topology(sim_spec_t *spec)
     }
 
     for (radix = 2;
-         ((radix < spec->topology.latency + 2) &&
+         ((radix < 2 * spec->topology.latency) &&
           (radix <= spec->node_count) &&
           (ret_val == OK));
          radix++) {
