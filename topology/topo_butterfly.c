@@ -153,16 +153,17 @@ int butterfly_next(comm_graph_t *graph, send_list_t *in_queue,
     return DONE;
 
 process_incoming:
-    if (queue_check_msg(in_queue, BUTTERFLY_MSG_LAST, result)) {
-        return OK;
-    }
+    //if (queue_check_msg(in_queue, BUTTERFLY_MSG_LAST, result)) {
+    //    return OK;
+    //}
 
 // TODO: send keep-alives!
     result->distance = DISTANCE_NO_PACKET;
     return OK;
 }
 
-int butterfly_fix(comm_graph_t *graph, void *internal_ctx, node_id broken)
+int butterfly_fix(comm_graph_t *graph, void *internal_ctx,
+		          tree_recovery_method_t recovery, node_id broken)
 {
     return ERROR;
 }

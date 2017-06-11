@@ -1,8 +1,10 @@
+#include <math.h>
 #include <assert.h>
 #include "topology.h"
 #include "../state/state_matrix.h"
 
 #define TREE_PACKET_CHOSEN (1)
+#define TREE_SERVICE_CYCLE_LENGTH ()
 
 typedef unsigned tree_distance_t;
 typedef unsigned tree_step_t;
@@ -19,9 +21,11 @@ typedef struct tree_contact {
 
 typedef struct tree_context {
     unsigned char *my_bitfield;
+    step_num *step_index;
     node_id my_node;
     step_num latency;
-    unsigned seed;
+    enum tree_service_cycle_method service_method;
+    unsigned random_seed;
 
     unsigned next_wait_index;
     unsigned next_send_index;
@@ -34,10 +38,12 @@ typedef struct tree_context {
 
 enum tree_msg_type {
     TREE_MSG_DATA          = 0,
+#define TREE_MSG_DATA(distance) (TREE_MSG_DATA          + TREE_MSG_MAX * distance)
     TREE_MSG_KEEPALIVE     = 1,
-#define TREE_MSG_KA(distance)  (TREE_MSG_KEEPALIVE     + 2*distance)
+#define TREE_MSG_KA(distance)   (TREE_MSG_KEEPALIVE     + TREE_MSG_MAX * distance)
     TREE_MSG_KEEPALIVE_ACK = 2,
-#define TREE_MSG_ACK(distance) (TREE_MSG_KEEPALIVE_ACK + 2*distance)
+#define TREE_MSG_ACK(distance)  (TREE_MSG_KEEPALIVE_ACK + TREE_MSG_MAX * distance)
+	TREE_MSG_MAX           = 3,
 };
 
 enum tree_action {
@@ -52,12 +58,7 @@ struct order {
 };
 
 size_t tree_ctx_size() {
-    return sizeof(struct tree_ctx);
-}
-
-static step_num tree_calc_timeout(tree_distance_t distance, step_num latency, unsigned radix)
-{
-	return (pow(2, distance-1)*(pow(radix, distance)+1)/(radix+1))+(2*latency);
+    return sizeof(tree_context_t);
 }
 
 int tree_start(topology_spec_t *spec, comm_graph_t *graph, tree_context_t *ctx)
@@ -69,7 +70,8 @@ int tree_start(topology_spec_t *spec, comm_graph_t *graph, tree_context_t *ctx)
 	memset(ctx, 0, sizeof(*ctx));
 	ctx->my_node = spec->my_rank;
 	ctx->latency = spec->latency;
-	ctx->seed = spec->random_seed;
+	ctx->step_index = &spec->step_index;
+	ctx->random_seed = spec->random_seed;
 	ctx->my_bitfield = spec->my_bitfield;
 	ctx->contacts_size = my_node->directions[COMM_GRAPH_FATHERS]->node_count +
 			my_node->directions[COMM_GRAPH_CHILDREN]->node_count;
@@ -105,8 +107,35 @@ static void tree_validate(tree_context_t *ctx)
 	}
 }
 
+static tree_distance_t tree_pick_service_distance(tree_context_t *ctx)
+{
+	tree_distance_t distance;
+	step_num step_index;
+	float tester, rand;
+
+	switch (ctx->service_method) {
+	case TREE_SERVICE_CYCLE_RANDOM:
+		tester = 1.0;
+		distance = 0;
+		rand = FLOAT_RANDOM(ctx);
+		while (rand < tester) {
+			tester /= 2.0;
+			distance++;
+		}
+		break;
+
+	case TREE_SERVICE_CYCLE_CALC:
+		step_index = *ctx->step_index;
+		distance = (pow(step_index, 2.0) * TREE_SERVICE_CYCLE_LENGTH) %
+				TREE_SERVICE_CYCLE_LENGTH;
+		break;
+	}
+	return distance;
+}
+
 static inline int tree_next_by_topology(comm_graph_t *graph,
-		tree_context_t *ctx, send_item_t *result)
+		                                tree_context_t *ctx,
+										send_item_t *result)
 {
     node_id next_peer;
     unsigned order_idx;
@@ -141,6 +170,9 @@ static inline int tree_next_by_topology(comm_graph_t *graph,
                     }
                 }
             }
+
+            // TODO: wait on sons!!!
+
             if (wait_index >= dir_ptr->node_count) {
                 wait_index -= dir_ptr->node_count;
             }
@@ -171,104 +203,155 @@ static inline int tree_next_by_topology(comm_graph_t *graph,
     return OK;
 }
 
-static inline int tree_next_by_service_cycle(send_list_t *in_queue,
-		tree_context_t *ctx, send_item_t *result)
+static inline int queue_get_msg_by_type(send_list_t *in_queue,
+		                                msg_type msg,
+										send_item_t *result)
 {
-	unsigned idx, max_timeout_idx;
+    send_item_t *it;
+    unsigned pkt_idx, used;
+    for (pkt_idx = 0, it = &in_queue->items[0], used = in_queue->used;
+         (pkt_idx < in_queue->allocated) && (used > 0);
+         pkt_idx++, it++) {
+        if (it->distance != DISTANCE_VACANT) {
+            if (it->msg % TREE_MSG_MAX == msg) {
+                memcpy(result, it, sizeof(*it));
+                it->distance = DISTANCE_VACANT;
+                in_queue->used--;
+                return 1;
+            }
+            used--;
+        }
+    }
+    return 0;
+}
 
-	/* Determine which tree-distance gets service this time */
-	float tester = 1.0, rand = FLOAT_RANDOM(ctx->seed);
-	tree_distance_t distance = 0;
-	while (rand < tester) {
-		tester /= 2.0;
-		distance++;
-	}
+static inline int queue_get_msg_by_distance(send_list_t *in_queue,
+		                                    msg_type msg,
+		                                    tree_distance_t distance,
+											send_item_t *result)
+{
+    send_item_t *it;
+    unsigned pkt_idx, used;
+    for (pkt_idx = 0, it = &in_queue->items[0], used = in_queue->used;
+         (pkt_idx < in_queue->allocated) && (used > 0);
+         pkt_idx++, it++) {
+        if (it->distance != DISTANCE_VACANT) {
+            if (it->msg == (msg + TREE_MSG_MAX * distance)) {
+                memcpy(result, it, sizeof(*it));
+                it->distance = DISTANCE_VACANT;
+                in_queue->used--;
+                return 1;
+            }
+            used--;
+        }
+    }
+    return 0;
+}
 
-	if (queue_check_msg(in_queue, TREE_MSG_ACK(distance), result)) {
-		return OK;
-	}
+static step_num tree_calc_timeout(tree_distance_t distance, step_num latency, unsigned radix)
+{
+	return (pow(2, distance-1)*(pow(radix, distance)+1)/(radix+1))+(2*latency);
+}
 
-	if (queue_check_msg(in_queue, TREE_MSG_KA(distance), result)) {
-		return OK;
-	}
+static void tree_contact_keep_alive(tree_contact_t *contact, send_item_t *result) {
+	/* Update contact record */
 
-	for (idx = 0; idx < ctx->contacts_used; idx++) {
-		/* Choose the least recent contact with the given distance - KA it */
-
-
-		return TREE_PACKET_CHOSEN;
-	}
-
-	return OK;
+	/* Generate output packet */
+	result->bitfield = BITFIELD_FILL_AND_SEND;
+	result->dst = contact->node_id;
+	result->msg = TREE_MSG_KA(contact->distance);
+	result->timeout =
 }
 
 int tree_next(comm_graph_t *graph, send_list_t *in_queue,
-              struct tree_ctx *internal_ctx, send_item_t *result)
+		      tree_context_t *ctx, send_item_t *result)
 {
+	step_num current_step_index;
+	tree_distance_t distance;
+	unsigned idx;
+	int ret;
+
 	/* Step #0: Assert algorithm's assumptions */
 	tree_validate(ctx);
 
-	/* Step #1: Data is first priority - recv/send data if possible */
-	if (ctx->is_blocking) {
-		/* Check for incoming data packets */
-		if (queue_check_msg(in_queue, TREE_MSG_DATA, result)) {
-			return OK;
-		}
-
-		/* Check for outgoing data packets */
-		if (tree_next_by_topology(ctx)) {
-			return ctx->is_done ? DONE : OK;
-		}
+	/* Step #1: If data can be sent - send it! (w/o reading incoming messages) */
+	ret = tree_next_by_topology(graph, ctx, result);
+	if (ret == TREE_PACKET_CHOSEN) {
+		return OK;
+	}
+	if (ret != OK) {
+		return ret;
 	}
 
-	/* Step #2: Serve peers by "service-cycle" */
-	if (tree_next_by_service_cycle(in_queue, ctx, result)) {
+	/* Step #2: Determine which tree-distance gets service this time */
+	distance = tree_pick_service_distance(ctx);
+
+	/* Step #3: Data (from service-distance) comes first, then keep-alives */
+	if (queue_get_msg_by_distance(in_queue, TREE_MSG_DATA, distance, result) ||
+		queue_get_msg_by_distance(in_queue, TREE_MSG_KEEPALIVE, distance, result) ||
+		queue_get_msg_by_distance(in_queue, TREE_MSG_KEEPALIVE_ACK, distance, result)) {
 		return OK;
 	}
 
-	/* Step #3: Just read any incoming packet */
-	// TODO: read from the queue...
+	/* Step #4: If its time is up - send a keep-alive within service-distance */
+	current_step_index = *ctx->step_index;
+	for (idx = 0; idx < ctx->contacts_used; idx++) {
+		tree_contact_t *contact = &ctx->contacts[idx];
+		if ((contact->distance == distance) &&
+			(contact->timeout >= current_step_index)) {
+			tree_contact_keep_alive(contact, result);
+			return TREE_PACKET_CHOSEN;
+		}
+	}
 
+	/* Step #5: Just read any other packet from the queue... */
+	if (queue_get_msg_by_type(in_queue, TREE_MSG_DATA, result) ||
+		queue_get_msg_by_type(in_queue, TREE_MSG_KEEPALIVE, result) ||
+		queue_get_msg_by_type(in_queue, TREE_MSG_KEEPALIVE_ACK, result)) {
+		return OK;
+	}
+
+	/* Step #6: Nothing to do - remain idle */
     result->distance = DISTANCE_NO_PACKET;
     return OK;
 }
 
 int tree_fix(comm_graph_t *graph, tree_context_t *ctx,
-             tree_recovery_type_t method, node_id broken)
+			 tree_recovery_method_t recovery, node_id broken)
 {
     /* Exclude the broken node from further sends */
-    int ret = comm_graph_append(graph, internal_ctx->my_node, broken, COMM_GRAPH_EXCLUDE);
+    int ret = comm_graph_append(graph, ctx->my_node, broken, COMM_GRAPH_EXCLUDE);
     if (ret != OK) {
         return ret;
     }
 
-    printf("OMIT: %lu omits %lu\n", internal_ctx->my_node, broken);
+    printf("OMIT: %lu omits %lu\n", ctx->my_node, broken);
 
-    switch (method) {
+    switch (recovery) {
     case COLLECTIVE_RECOVERY_CATCH_THE_BUS: // TODO: implement!
     case COLLECTIVE_RECOVERY_BROTHER_FIRST: //TODO: implement!
         /* calc brother - reverse BFS */
         /* add brother as father, myself as his child */
     case COLLECTIVE_RECOVERY_FATHER_FIRST:
-        if (broken < internal_ctx->my_node) {
+        if (broken < ctx->my_node) {
             /* the broken node is above me in the tree: */
             if (comm_graph_count(graph, broken, COMM_GRAPH_FATHERS) == 0) {
                 /* if broken has no fathers - add his children to COMM_GRAPH_EXTRA_FATHERS and me as their son */
-                ret = comm_graph_copy(graph, broken, internal_ctx->my_node, COMM_GRAPH_CHILDREN, COMM_GRAPH_EXTRA_FATHERS);
+                ret = comm_graph_copy(graph, broken, ctx->my_node, COMM_GRAPH_CHILDREN, COMM_GRAPH_EXTRA_FATHERS);
                 if (ret != OK) {
                     return ret;
                 }
 
-                ret = comm_graph_copy(graph, broken, internal_ctx->my_node, COMM_GRAPH_MR_CHILDREN, COMM_GRAPH_EXTRA_FATHERS);
+                ret = comm_graph_copy(graph, broken, ctx->my_node, COMM_GRAPH_MR_CHILDREN, COMM_GRAPH_EXTRA_FATHERS);
             } else {
                 /* add broken's fathers to COMM_GRAPH_EXTRA_FATHERS, and me as their son */
-                ret = comm_graph_copy(graph, broken, internal_ctx->my_node, COMM_GRAPH_FATHERS, COMM_GRAPH_EXTRA_FATHERS);
+                ret = comm_graph_copy(graph, broken, ctx->my_node, COMM_GRAPH_FATHERS, COMM_GRAPH_EXTRA_FATHERS);
             }
             if (ret != OK) {
                 return ret;
             }
         }
-        return comm_graph_copy(graph, broken, internal_ctx->my_node, COMM_GRAPH_CHILDREN, COMM_GRAPH_EXTRA_CHILDREN);
+        return comm_graph_copy(graph, broken, ctx->my_node, COMM_GRAPH_CHILDREN, COMM_GRAPH_EXTRA_CHILDREN);
         break;
 
 

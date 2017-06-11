@@ -103,7 +103,7 @@ int topology_iterator_next(topology_spec_t *spec, topo_funcs_t *funcs,
 }
 
 int topology_iterator_omit(topology_iterator_t *iterator, topo_funcs_t *funcs,
-                           tree_recovery_type_t method, node_id broken)
+                           tree_recovery_method_t method, node_id broken)
 {
     if (iterator->graph == current_topology) {
         iterator->graph = comm_graph_clone(current_topology);

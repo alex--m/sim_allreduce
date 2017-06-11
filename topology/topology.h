@@ -30,14 +30,19 @@ typedef enum model_type
     COLLECTIVE_MODEL_ALL /* default, must be last */
 } model_type_t;
 
-typedef enum tree_recovery_type
+typedef enum tree_service_cycle_method {
+	TREE_SERVICE_CYCLE_RANDOM,
+	TREE_SERVICE_CYCLE_CALC
+} tree_service_cycle_method_t;
+
+typedef enum tree_recovery_method
 {
     COLLECTIVE_RECOVERY_FATHER_FIRST = 0,
     COLLECTIVE_RECOVERY_BROTHER_FIRST,
     COLLECTIVE_RECOVERY_CATCH_THE_BUS,
 
     COLLECTIVE_RECOVERY_ALL /* default, must be last */
-} tree_recovery_type_t;
+} tree_recovery_method_t;
 
 typedef struct topology_spec
 {
@@ -53,7 +58,8 @@ typedef struct topology_spec
     union {
         struct {
             unsigned radix;
-            tree_recovery_type_t recovery;
+            tree_recovery_method_t recovery;
+            tree_service_cycle_method_t service;
         } tree;
         struct {
             unsigned radix;
@@ -114,7 +120,7 @@ typedef struct topo_funcs
     int    (*next_f)(comm_graph_t *graph, send_list_t *in_queue,
                      void *internal_ctx, send_item_t *result);
     int    (*fix_f)(comm_graph_t *graph, void *internal_ctx,
-                    tree_recovery_type_t method, node_id broken);
+                    tree_recovery_method_t method, node_id broken);
 } topo_funcs_t;
 
 #define IS_DEAD(iterator) (iterator->time_offset == TIME_OFFSET_DEAD)
@@ -130,28 +136,6 @@ int topology_iterator_next(topology_spec_t *spec, topo_funcs_t *funcs,
                            topology_iterator_t *iterator, send_item_t *result);
 
 int topology_iterator_omit(topology_iterator_t *iterator, topo_funcs_t *funcs,
-                           tree_recovery_type_t method, node_id broken);
+                           tree_recovery_method_t method, node_id broken);
 
 void topology_iterator_destroy(topology_iterator_t *iterator);
-
-static inline int queue_check_msg(send_list_t *in_queue,
-                                  msg_type msg,
-                                  send_item_t *result)
-{
-    send_item_t *it;
-    unsigned pkt_idx, used;
-    for (pkt_idx = 0, it = &in_queue->items[0], used = in_queue->used;
-         (pkt_idx < in_queue->allocated) && (used > 0);
-         pkt_idx++, it++) {
-        if (it->distance != DISTANCE_VACANT) {
-            if (it->msg == msg) {
-                memcpy(result, it, sizeof(*it));
-                it->distance = DISTANCE_VACANT;
-                in_queue->used--;
-                return 1;
-            }
-            used--;
-        }
-    }
-    return 0;
-}
