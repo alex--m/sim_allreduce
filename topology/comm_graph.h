@@ -19,9 +19,14 @@ enum comm_graph_direction_type {
     COMM_GRAPH_FATHERS,       /* Fathers in a tree */
 
     COMM_GRAPH_EXCLUDE,       /* Nodes to avoid during fault-tolerance*/
+
     COMM_GRAPH_MR_CHILDREN,   /* "Multi-root" peers */
     COMM_GRAPH_EXTRA_CHILDREN,/* New sons, results of fault-tolerance */
     COMM_GRAPH_EXTRA_FATHERS, /* New fathers, results of fault-tolerance */
+
+	COMM_GRAPH_ETA,           /* ETA for sub-tree and full output arrival (two values) */
+#define COMM_GRAPH_ETA_CHILDREN (0)
+#define COMM_GRAPH_ETA_FATHERS  (1)
 
     COMM_GRAPH_MAX_DIMENTIONS /* MUST BE LAST */
 };

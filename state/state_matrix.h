@@ -21,13 +21,16 @@
 #define GET_NEW_BITFIELD(ctx, local_node) ((ctx)->new_matrix + \
     ((local_node) * CTX_BITFIELD_SIZE(ctx)))
 
+#define _SET_BIT(bitfield, offset) \
+	*(bitfield + (((offset) + 2) >> 3)) |= (1 << (((offset) + 2) & 7))
+
 #define SET_OLD_BIT(ctx, local_node, node_bit) \
-    *(GET_OLD_BITFIELD(ctx, local_node) + (((node_bit) + 2) >> 3)) |= \
-        (1 << (((node_bit) + 2) & 7))
+    _SET_BIT(GET_OLD_BITFIELD(ctx, local_node), node_bit)
 
 #define SET_NEW_BIT(ctx, local_node, node_bit) \
-    *(GET_NEW_BITFIELD(ctx, local_node) + (((node_bit) + 2) >> 3)) |= \
-        (1 << (((node_bit) + 2) & 7))
+    _SET_BIT(GET_NEW_BITFIELD(ctx, local_node), node_bit)
+
+#define SET_FULL_HERE(bitfield) _SET_BIT(bitfield, -2)
 
 #define _IS_BIT_SET_HERE(node_bit, bitfield) \
     ((*((bitfield) + (((node_bit) + 2) >> 3)) & \
@@ -81,15 +84,12 @@
 #define POPCOUNT(ctx, local_node) \
     POPCOUNT_HERE(GET_NEW_BITFIELD(ctx, local_node), ctx->spec->node_count)
 
-#define MY_POPCOUNT(ctx) POPCOUNT(ctx, ctx->my_rank)
-
-#define MERGE(ctx, local_node, addition) ({                                   \
+#define MERGE_HERE(present, addition, size, count) ({                         \
     if (IS_FULL_HERE(addition)) {                                             \
-        SET_FULL(ctx, local_node);                                            \
-    } else if (!IS_FULL(ctx, local_node)) {                                   \
+        SET_FULL_HERE(present);                                              \
+    } else if (!IS_FULL_HERE(present)) {                                      \
         unsigned i, added, in_cnt, out_cnt, mask = (unsigned)-1;              \
-        unsigned *present = (unsigned*)GET_NEW_BITFIELD(ctx, local_node);     \
-        unsigned max = CTX_BITFIELD_SIZE(ctx) / sizeof(unsigned);             \
+        unsigned max = size / sizeof(unsigned);                               \
                                                                               \
         /* special treatment for first bits */                                \
         added = *((unsigned*)addition);                                       \
@@ -105,12 +105,9 @@
             out_cnt += __builtin_popcount(*(present + i));                    \
             in_cnt += __builtin_popcount(added);                              \
         }                                                                     \
-        if (out_cnt == ctx->spec->node_count) SET_FULL(ctx, local_node);      \
+        if (out_cnt == count) SET_FULL_HERE(present);                         \
     }                                                                         \
 })
-
-#define MERGE_LOCAL(ctx, local_node, added_proc) \
-    MERGE(ctx, local_node, GET_OLD_BITFIELD(ctx, added_proc))
 
 #define PRINT(ctx, local_node) ({                                             \
     int i;                                                                    \

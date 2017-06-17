@@ -16,10 +16,10 @@ typedef struct sim_spec
     state_t *state;
     topology_spec_t topology;
 
-    unsigned node_count; /* Total number of nodes */
+    node_id  node_count; /* Total number of nodes */
     unsigned test_count; /* for statistical purposes */
-    unsigned step_count; /* 0 to run until -1 is returned */
-    unsigned last_node_total_size; /* OPTIMIZATION */
+    step_num step_count; /* 0 to run until -1 is returned */
+    node_id  last_node_total_size; /* OPTIMIZATION */
 
     unsigned mpi_rank;
     unsigned mpi_size;
@@ -69,7 +69,7 @@ int sim_test_iteration(sim_spec_t *spec, raw_stats_t *stats)
             ret_val = state_next_step(spec->state);
             spec->topology.step_index++;
 
-            if (spec->topology.step_index > 10000) return ERROR;// TODO: remove!
+            if (spec->topology.step_index > 100) return ERROR;// TODO: remove!
         }
     }
 
@@ -130,7 +130,7 @@ int sim_test(sim_spec_t *spec)
 
     if (is_root) {
         if (spec->topology.verbose) {
-            printf("N=%i M=%i Topo=%i Radix=%i Spread=%i Fail%%=%.1f Steps(Avg.)=%lu\n",
+            printf("N=%lu M=%u Topo=%u Radix=%u Spread=%lu Fail%%=%.1f Steps(Avg.)=%lu\n",
                     spec->node_count,
                     spec->topology.model_type,
                     spec->topology.topology_type,
@@ -142,7 +142,7 @@ int sim_test(sim_spec_t *spec)
                             spec->topology.model.node_fail_rate : 0,
                     spec->steps.sum / spec->steps.cnt);
         } else {
-            printf("%i,%i,%i,%i,%i,%.1f,%.1f,%i",
+            printf("%lu,%u,%u,%u,%lu,%.1f,%.1f,%u",
                     spec->node_count,
                     spec->topology.model_type,
                     spec->topology.topology_type,
@@ -176,7 +176,7 @@ int sim_test(sim_spec_t *spec)
 int sim_coll_tree_recovery(sim_spec_t *spec)
 {
     int ret_val = OK;
-    tree_recovery_type_t index;
+    tree_recovery_method_t index;
 
     if (spec->topology.topology.tree.recovery != COLLECTIVE_RECOVERY_ALL) {
         return sim_test(spec);
@@ -485,10 +485,10 @@ int main(int argc, char **argv)
         printf("Execution specification:\n"
                 "model=%i "
                 "topology=%i "
-                "step_count=%i "
+                "step_count=%lu "
                 "test_count=%i "
                 "tree_radix=%i "
-                "latency=%i "
+                "latency=%lu "
                 "random-seed=%i\n",
                 spec.topology.model_type, spec.topology.topology_type,
                 spec.step_count, spec.test_count,

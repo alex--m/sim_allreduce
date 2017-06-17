@@ -50,6 +50,7 @@ typedef struct topology_spec
     node_id my_rank;
     node_id node_count;
     unsigned char *my_bitfield;
+    size_t bitfield_size;
     unsigned random_seed;
     step_num step_index; /* struct abuse in favor of optimization */
     step_num latency;

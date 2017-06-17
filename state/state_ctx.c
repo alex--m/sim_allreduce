@@ -48,7 +48,8 @@ int state_create(topology_spec_t *spec, state_t *old_state, state_t **new_state)
 
         ctx->spec = spec;
         ctx->per_proc_size = topology_iterator_size();
-        CTX_BITFIELD_SIZE(ctx) = CALC_BITFIELD_SIZE(spec->node_count);
+        spec->bitfield_size = CTX_BITFIELD_SIZE(ctx) =
+        		CALC_BITFIELD_SIZE(spec->node_count);
 
         ctx->new_matrix = calloc(1, CTX_MATRIX_SIZE(ctx));
         if (ctx->new_matrix == NULL)
@@ -201,8 +202,9 @@ static inline int state_notify_dead(state_t *state, node_id dead, node_id target
 static inline int state_process(state_t *state, send_item_t *incoming, send_list_t *list)
 {
     int ret_val = OK;
+    topology_iterator_t *destination = GET_ITERATOR(state, incoming->dst);
 
-    if (IS_DEAD(GET_ITERATOR(state, incoming->dst))) {
+    if (IS_DEAD(destination)) {
         /* Packet destination is dead */
         if (!IS_DEAD(GET_ITERATOR(state, incoming->src))) {
             /* live A sends to dead B - A needs to be "timed-out" (notified) */
@@ -212,17 +214,12 @@ static inline int state_process(state_t *state, send_item_t *incoming, send_list
         /* Packet destination is alive */
         if (IS_LIVE_HERE(incoming->bitfield)) {
             /* live A sends to live B */
-            if (list) {
-                incoming->distance = DISTANCE_SEND_NOW;
-                state_enqueue(state, incoming, list);
-                incoming->distance = DISTANCE_VACANT;
-            } else {
-                MERGE(state, incoming->dst, incoming->bitfield);
-            }
+			incoming->distance = DISTANCE_SEND_NOW;
+			state_enqueue(state, incoming, list);
+			incoming->distance = DISTANCE_VACANT;
         } else {
             /* dead A sends to live B - simulates timeout on B */
-            topology_iterator_t *iterator = GET_ITERATOR(state, incoming->dst);
-            ret_val = topology_iterator_omit(iterator, state->funcs,
+            ret_val = topology_iterator_omit(destination, state->funcs,
                     state->spec->topology.tree.recovery, incoming->src);
             SET_NEW_BIT(state, incoming->dst, incoming->src);
             // TODO: PROBLEM: if a dead X is marked "here", how do i wait for his children?!
@@ -279,6 +276,7 @@ int state_next_step(state_t *state)
             res.distance = DISTANCE_NO_PACKET;
             res.dst = DESTINATION_DEAD;
             dead_count++;
+            ret_val = OK; // For verbose mode
         } else {
             /* Get next the target rank of the next send */
             ret_val = topology_iterator_next(spec, funcs, iterator, &res);
@@ -293,21 +291,14 @@ int state_next_step(state_t *state)
                 } else {
                     return ret_val;
                 }
-            } else {
-            	/* Handle the decision */
-            	if (res.distance != DISTANCE_NO_PACKET) {
-            		if (res.bitfield == BITFIELD_FILL_AND_SEND) {
-            			/* Send this outgoing packet */
-            			res.src = idx;
-            			res.bitfield = GET_OLD_BITFIELD(state, idx);
-            			ret_val = state_enqueue(state, &res, NULL);
-            		} else {
-            			ret_val = state_process(state, &res, NULL);
-            		}
-            		if (ret_val != OK) {
-            			return ret_val;
-            		}
-            	}
+            } if (res.distance != DISTANCE_NO_PACKET) {
+				/* Send this outgoing packet */
+				res.src = idx;
+				res.bitfield = GET_OLD_BITFIELD(state, idx);
+				ret_val = state_enqueue(state, &res, NULL);
+				if (ret_val != OK) {
+					return ret_val;
+				}
             }
         }
 
