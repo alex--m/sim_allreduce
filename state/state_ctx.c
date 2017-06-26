@@ -294,6 +294,7 @@ int state_next_step(state_t *state)
             } if (res.distance != DISTANCE_NO_PACKET) {
 				/* Send this outgoing packet */
 				res.src = idx;
+				assert(res.bitfield == BITFIELD_FILL_AND_SEND);
 				res.bitfield = GET_OLD_BITFIELD(state, idx);
 				ret_val = state_enqueue(state, &res, NULL);
 				if (ret_val != OK) {

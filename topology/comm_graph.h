@@ -24,10 +24,6 @@ enum comm_graph_direction_type {
     COMM_GRAPH_EXTRA_CHILDREN,/* New sons, results of fault-tolerance */
     COMM_GRAPH_EXTRA_FATHERS, /* New fathers, results of fault-tolerance */
 
-	COMM_GRAPH_ETA,           /* ETA for sub-tree and full output arrival (two values) */
-#define COMM_GRAPH_ETA_CHILDREN (0)
-#define COMM_GRAPH_ETA_FATHERS  (1)
-
     COMM_GRAPH_MAX_DIMENTIONS /* MUST BE LAST */
 };
 
@@ -40,6 +36,9 @@ typedef struct comm_graph_direction {
 typedef comm_graph_direction_t *comm_graph_direction_ptr_t;
 
 typedef struct comm_graph_node {
+	step_num data_eta[2]; /* ETA for sub-tree and full output arrival (two values) */
+#define DATA_ETA_SUBTREE   (0)
+#define DATA_ETA_FULL_TREE (1)
     comm_graph_direction_ptr_t directions[COMM_GRAPH_MAX_DIMENTIONS];
 } comm_graph_node_t;
 

@@ -123,11 +123,16 @@ int comm_graph_append(comm_graph_t* comm_graph, node_id src, node_id dst,
         enum comm_graph_direction_type direction)
 {
     comm_graph_node_t *node = &comm_graph->nodes[src];
+
+    /* Sanity checks */
     assert(src < comm_graph->node_count);
     assert(dst < comm_graph->node_count);
     assert((src != dst) || (direction == COMM_GRAPH_EXCLUDE));
+
+    /* Make the connection in the graph */
     COMM_GRAPH_DIRECTION_APPEND(node, direction, dst);
 
+    /* Make the reverse connection in the graph */
     if ((comm_graph->is_bidirectional) &&
         ((direction == COMM_GRAPH_CHILDREN) ||
          (direction == COMM_GRAPH_MR_CHILDREN))) {
