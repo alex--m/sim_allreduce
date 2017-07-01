@@ -145,7 +145,7 @@ static inline int state_enqueue(state_t *state, send_item_t *sent, send_list_t *
         }
 
         list->items = realloc(list->items,
-                list->allocated * sizeof(*list->items));
+                list->allocated * sizeof(send_item_t));
         if (!list->items) {
             return ERROR;
         }
@@ -199,7 +199,7 @@ static inline int state_notify_dead(state_t *state, node_id dead, node_id target
     return state_enqueue(state, &death, NULL);
 }
 
-static inline int state_process(state_t *state, send_item_t *incoming, send_list_t *list)
+static inline int state_process(state_t *state, send_item_t *incoming)
 {
     int ret_val = OK;
     topology_iterator_t *destination = GET_ITERATOR(state, incoming->dst);
@@ -215,7 +215,7 @@ static inline int state_process(state_t *state, send_item_t *incoming, send_list
         if (IS_LIVE_HERE(incoming->bitfield)) {
             /* live A sends to live B */
 			incoming->distance = DISTANCE_SEND_NOW;
-			state_enqueue(state, incoming, list);
+			state_enqueue(state, incoming, &destination->in_queue);
 			incoming->distance = DISTANCE_VACANT;
         } else {
             /* dead A sends to live B - simulates timeout on B */
@@ -239,10 +239,9 @@ static inline int state_dequeue(state_t *state)
     for (slot_idx = 0, item = &outq->items[0];
          (used > 0) && (slot_idx < outq->allocated) && (ret_val == OK);
          slot_idx++, item++) {
-        if (item->distance) {
-            if (--item->distance == 0) {
-                topology_iterator_t *iterator = GET_ITERATOR(state, item->dst);
-                ret_val = state_process(state, item, &iterator->in_queue);
+        if (item->distance != DISTANCE_VACANT) {
+            if (--item->distance == DISTANCE_VACANT) {
+                ret_val = state_process(state, item);
                 outq->used--;
             }
             used--;
@@ -272,6 +271,7 @@ int state_next_step(state_t *state)
     /* Iterate over all process-iterators */
     for (idx = 0; idx < state->spec->node_count; idx++) {
         topology_iterator_t *iterator = GET_ITERATOR(state, idx);
+        // TODO: if finished and not #0 - just skip it!
         if (IS_DEAD(iterator)) {
             res.distance = DISTANCE_NO_PACKET;
             res.dst = DESTINATION_DEAD;
@@ -279,6 +279,7 @@ int state_next_step(state_t *state)
             ret_val = OK; // For verbose mode
         } else {
             /* Get next the target rank of the next send */
+        	res.src = idx;
             ret_val = topology_iterator_next(spec, funcs, iterator, &res);
             if (ret_val != OK) {
                 if (ret_val == DONE) {
@@ -291,15 +292,21 @@ int state_next_step(state_t *state)
                 } else {
                     return ret_val;
                 }
-            } if (res.distance != DISTANCE_NO_PACKET) {
-				/* Send this outgoing packet */
-				res.src = idx;
-				assert(res.bitfield == BITFIELD_FILL_AND_SEND);
-				res.bitfield = GET_OLD_BITFIELD(state, idx);
-				ret_val = state_enqueue(state, &res, NULL);
-				if (ret_val != OK) {
-					return ret_val;
-				}
+            } else if (res.distance != DISTANCE_NO_PACKET) {
+            	if (res.dst == idx) {
+            		if (res.bitfield != BITFIELD_IGNORE_DATA) {
+            			MERGE(state, idx, res.bitfield);
+            		}
+            	} else {
+            		/* Send this outgoing packet */
+            		res.src = idx;
+            		assert(res.bitfield == BITFIELD_FILL_AND_SEND);
+            		res.bitfield = GET_OLD_BITFIELD(state, idx);
+            		ret_val = state_enqueue(state, &res, NULL);
+            		if (ret_val != OK) {
+            			return ret_val;
+            		}
+            	}
             }
         }
 
@@ -316,7 +323,7 @@ int state_next_step(state_t *state)
             	if (res.dst == idx) {
             		printf(" - accepts from #%lu (type=%lu)", res.src, res.msg);
             	} else {
-            		printf(" - sends to #%lu", res.dst);
+            		printf(" - sends to #%lu (msg=%lu)", res.dst, res.msg);
             	}
             } else if (res.dst == DESTINATION_UNKNOWN) {
             	printf(" - waits for somebody (bitfield incomplete)");

@@ -82,12 +82,13 @@ typedef struct send_item {
     node_id       src;       /* packet source (sender) */
     msg_type      msg;       /* packet type (per-protocol) */
     step_num      distance;  /* packet distance (time to be delayed in queue) */
-#define           DISTANCE_VACANT (0)
+#define           DISTANCE_VACANT    (0)
 #define           DISTANCE_NO_PACKET (0)
-#define           DISTANCE_SEND_NOW (1)
+#define           DISTANCE_SEND_NOW  (1)
     step_num      timeout;   /* packet timeout (after which consider peer dead) */
-    unsigned char *bitfield; /* pointer to the packet data */
+    unsigned char *bitfield; /* pointer to the packet data - MUST BE LAST MEMBER */
 #define           BITFIELD_FILL_AND_SEND (NULL)
+#define           BITFIELD_IGNORE_DATA   (NULL)
 } send_item_t;
 
 typedef struct send_list {

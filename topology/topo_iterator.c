@@ -81,6 +81,7 @@ int topology_iterator_next(topology_spec_t *spec, topo_funcs_t *funcs,
         break;
 
     case COLLECTIVE_MODEL_NODES_FAILING:
+    	// TODO: prevent #0 from dying!
         if (spec->model.node_fail_rate > FLOAT_RANDOM(spec)) {
             SET_DEAD(iterator);
             return DEAD;
