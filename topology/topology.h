@@ -85,7 +85,8 @@ typedef struct send_item {
 #define           DISTANCE_VACANT    (0)
 #define           DISTANCE_NO_PACKET (0)
 #define           DISTANCE_SEND_NOW  (1)
-    step_num      timeout;   /* packet timeout (after which consider peer dead) */
+    step_num      timeout;   /* packet timeout (after which consider peer dead),
+                                after subtracting the initial send distance */
     unsigned char *bitfield; /* pointer to the packet data - MUST BE LAST MEMBER */
 #define           BITFIELD_FILL_AND_SEND (NULL)
 #define           BITFIELD_IGNORE_DATA   (NULL)

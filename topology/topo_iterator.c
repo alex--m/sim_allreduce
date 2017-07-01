@@ -47,7 +47,8 @@ int topology_iterator_create(topology_spec_t *spec,
             CYCLIC_RANDOM(spec, spec->model.max_spread) : 0;
     memset(&iterator->in_queue, 0, sizeof(iterator->in_queue));
     if ((spec->model_type == COLLECTIVE_MODEL_NODES_MISSING) &&
-        (spec->model.node_fail_rate > FLOAT_RANDOM(spec))) {
+        (spec->model.node_fail_rate > FLOAT_RANDOM(spec)) &&
+		(spec->my_rank != 0)) {
         SET_DEAD(iterator);
         return DEAD;
     }
@@ -82,9 +83,12 @@ int topology_iterator_next(topology_spec_t *spec, topo_funcs_t *funcs,
 
     case COLLECTIVE_MODEL_NODES_FAILING:
     	// TODO: prevent #0 from dying!
-        if (spec->model.node_fail_rate > FLOAT_RANDOM(spec)) {
+        if ((spec->model.node_fail_rate > FLOAT_RANDOM(spec)) &&
+        	(result->src != 0)) {
+            result->distance = DISTANCE_NO_PACKET;
+            result->dst = DESTINATION_DEAD;
             SET_DEAD(iterator);
-            return DEAD;
+            return DEAD; /* Triggers topology fix */
         }
         /* Intentionally no break */
 

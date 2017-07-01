@@ -69,7 +69,10 @@ int sim_test_iteration(sim_spec_t *spec, raw_stats_t *stats)
             ret_val = state_next_step(spec->state);
             spec->topology.step_index++;
 
-            if (spec->topology.step_index > 100) return ERROR;// TODO: remove!
+            /* Sanity check: make sure we're not stuck indefinitely! */
+            if ((spec->node_count < 5) && (spec->topology.step_index > 10000)) {
+            	return ERROR;
+            }
         }
     }
 
@@ -234,7 +237,7 @@ int sim_coll_topology(sim_spec_t *spec)
     }
 
     for (index = 0;
-         ((index < COLLECTIVE_TOPOLOGY_ALL) && (ret_val == OK));
+         ((index < COLLECTIVE_TOPOLOGY_RECURSIVE_K_ING) && (ret_val == OK)); // TODO: reinstate RD
          index++) {
         spec->topology.topology_type = index;
         ret_val = sim_coll_radix_topology(spec);

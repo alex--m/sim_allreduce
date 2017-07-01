@@ -102,7 +102,6 @@ int state_create(topology_spec_t *spec, state_t *old_state, state_t **new_state)
         ret_val = topology_iterator_create(spec, ctx->funcs, it);
         if (ret_val != OK) {
             if (ret_val == DEAD) {
-                printf("\nREAL-DEAD!\n");
                 UNSET_LIVE(ctx, index);
             } else {
                 state_destroy(ctx);
@@ -187,18 +186,6 @@ static inline int state_enqueue(state_t *state, send_item_t *sent, send_list_t *
     return OK;
 }
 
-static inline int state_notify_dead(state_t *state, node_id dead, node_id target)
-{
-    send_item_t death = {
-            .dst = target,
-            .src = dead,
-            .bitfield = GET_OLD_BITFIELD(state, dead) // Never actually merged!
-    };
-
-    death.distance = 2 * state->spec->topology.tree.radix; // TODO: calc_timeout();
-    return state_enqueue(state, &death, NULL);
-}
-
 static inline int state_process(state_t *state, send_item_t *incoming)
 {
     int ret_val = OK;
@@ -208,7 +195,14 @@ static inline int state_process(state_t *state, send_item_t *incoming)
         /* Packet destination is dead */
         if (!IS_DEAD(GET_ITERATOR(state, incoming->src))) {
             /* live A sends to dead B - A needs to be "timed-out" (notified) */
-            ret_val = state_notify_dead(state, incoming->dst, incoming->src);
+            send_item_t death = {
+                    .dst = incoming->src,
+                    .src = incoming->dst,
+        			.distance = incoming->timeout,
+                    .bitfield = GET_NEW_BITFIELD(state, incoming->dst)
+					// Never actually merged - see below...
+            };
+            ret_val = state_enqueue(state, &death, NULL);
         }
     } else {
         /* Packet destination is alive */
@@ -222,6 +216,9 @@ static inline int state_process(state_t *state, send_item_t *incoming)
             ret_val = topology_iterator_omit(destination, state->funcs,
                     state->spec->topology.tree.recovery, incoming->src);
             SET_NEW_BIT(state, incoming->dst, incoming->src);
+            if (POPCOUNT(state, incoming->dst) == state->spec->node_count) {
+            	SET_FULL(state, incoming->dst);
+            }
             // TODO: PROBLEM: if a dead X is marked "here", how do i wait for his children?!
         }
     }
@@ -266,7 +263,10 @@ int state_next_step(state_t *state)
     memcpy(state->old_matrix, state->new_matrix, CTX_MATRIX_SIZE(state));
 
     /* Deliver queued packets */
-    state_dequeue(state);
+    ret_val = state_dequeue(state);
+    if (ret_val != OK) {
+    	return ERROR; /* Don't forward the error in case it's "DONE" */
+    }
 
     /* Iterate over all process-iterators */
     for (idx = 0; idx < state->spec->node_count; idx++) {
@@ -279,7 +279,7 @@ int state_next_step(state_t *state)
             ret_val = OK; // For verbose mode
         } else {
             /* Get next the target rank of the next send */
-        	res.src = idx;
+        	res.src = idx; /* Also used for "protecting" #0 from death */
             ret_val = topology_iterator_next(spec, funcs, iterator, &res);
             if (ret_val != OK) {
                 if (ret_val == DONE) {
@@ -315,7 +315,11 @@ int state_next_step(state_t *state)
             if (idx == 0) {
                 printf("\n");
             }
-            printf("\nproc=%3lu popcount:%3u\t", idx, POPCOUNT(state, idx));
+            if (IS_LIVE(state, idx)) {
+            	printf("\nproc=%lu\tpopcount=%u\t", idx, POPCOUNT(state, idx));
+            } else {
+            	printf("\nproc=%lu\tpopcount=DEAD\t", idx);
+            }
             PRINT(state, idx);
             if (ret_val == DONE) {
             	printf(" - Done!");
