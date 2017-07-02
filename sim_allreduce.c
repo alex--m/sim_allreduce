@@ -70,7 +70,7 @@ int sim_test_iteration(sim_spec_t *spec, raw_stats_t *stats)
             spec->topology.step_index++;
 
             /* Sanity check: make sure we're not stuck indefinitely! */
-            if ((spec->node_count < 5) && (spec->topology.step_index > 10000)) {
+            if ((spec->node_count < 9) && (spec->topology.step_index > 100)) {
             	return ERROR;
             }
         }

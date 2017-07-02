@@ -149,6 +149,22 @@ int comm_graph_count(comm_graph_t* comm_graph, node_id id,
     return comm_graph->nodes[id].directions[direction]->node_count;
 }
 
+static int comm_graph_is_duplicate(comm_graph_node_t *dst, node_id addition)
+{
+	node_id idx;
+	comm_graph_direction_ptr_t dir;
+	enum comm_graph_direction_type dir_type;
+	for (dir_type = 0; dir_type < COMM_GRAPH_MAX_DIMENTIONS; dir_type++) {
+		dir = dst->directions[dir_type];
+		for (idx = 0; idx < dir->node_count; idx++) {
+			if (dir->nodes[idx] == addition) {
+				return 1;
+			}
+		}
+	}
+	return 0;
+}
+
 int comm_graph_copy(comm_graph_t* comm_graph, node_id src, node_id dst,
         enum comm_graph_direction_type src_direction,
         enum comm_graph_direction_type dst_direction)
@@ -161,10 +177,11 @@ int comm_graph_copy(comm_graph_t* comm_graph, node_id src, node_id dst,
 
     for (index = 0; index < source->node_count; index++) {
         node_id candidate = source->nodes[index];
-        printf("ADDING1 %lu as dir=%i to %lu\n", candidate, dst_direction, dst);
-        if (!COMM_GRAPH_IS_EXCLUDED(dst_node, candidate)) {
-            printf("ADDING0 %lu as dir=%i to %lu\n", candidate, dst_direction, dst);
+        if (!comm_graph_is_duplicate(dst_node, candidate)) {
+            printf("\nADDING %lu as dir=%i to %lu", candidate, dst_direction, dst);
+            printf("\nBEFORE: node_count=%lu", dst_node->directions[dst_direction]->node_count);
             COMM_GRAPH_DIRECTION_APPEND(dst_node, dst_direction, candidate);
+            printf("\nAFTER: node_count=%lu", dst_node->directions[dst_direction]->node_count);
         }
     }
 
