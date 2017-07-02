@@ -66,10 +66,6 @@ int topology_iterator_next(topology_spec_t *spec, topo_funcs_t *funcs,
                            topology_iterator_t *iterator, send_item_t *result)
 {
 	comm_graph_t *graph = iterator->graph;
-    if ((iterator->time_finished) && (result->src != 0)) {
-        return DONE;
-    }
-
     result->distance = DISTANCE_SEND_NOW + spec->latency;
     switch (spec->model_type)
     {

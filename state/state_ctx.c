@@ -182,7 +182,7 @@ static inline int state_enqueue(state_t *state, send_item_t *sent, send_list_t *
     item = &list->items[slot_idx];
     memcpy(item, sent, offsetof(send_item_t, bitfield));
     memcpy(item->bitfield, sent->bitfield, slot_size);
-    if (list->max < list->used++) {
+    if (list->max < ++list->used) {
     	list->max = list->used;
     }
     return OK;
@@ -280,7 +280,7 @@ int state_next_step(state_t *state)
             res.dst = DESTINATION_DEAD;
             dead_count++;
             ret_val = OK; // For verbose mode
-        } else if (iterator->time_finished) {
+        } else if ((iterator->time_finished) && (idx != 0)) {
         	/* Already complete (for this node) */
         	ret_val = DONE;
             active_count--;
@@ -290,8 +290,11 @@ int state_next_step(state_t *state)
             ret_val = topology_iterator_next(spec, funcs, iterator, &res);
             if (ret_val != OK) {
                 if (ret_val == DONE) {
-                    assert(iterator->time_finished == 0);
-                    iterator->time_finished = state->spec->step_index;
+                    if (iterator->time_finished == 0) {
+                    	iterator->time_finished = state->spec->step_index;
+                    } else {
+                    	assert(idx == 0);
+                    }
                     active_count--;
                 } else if (ret_val == DEAD) {
                     UNSET_LIVE(state, idx);
@@ -361,9 +364,10 @@ int state_next_step(state_t *state)
         }
 
         /* Find earliest finisher ever */
+        // Note: Does NOT include #0 for spread calculation!
         for (idx = 1; idx < state->spec->node_count; idx++) {
         	iterator = GET_ITERATOR(state, idx);
-        	if (state->stats.first_step_counter < iterator->time_finished) {
+        	if (state->stats.first_step_counter > iterator->time_finished) {
         		state->stats.first_step_counter = iterator->time_finished;
         	}
         }

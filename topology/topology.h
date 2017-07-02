@@ -96,7 +96,7 @@ typedef struct send_list {
     unsigned char *data;     /* Array of stored data (matches items array) */
     unsigned      allocated; /* Number of items allocated in memory */
     unsigned      used;      /* Number of items used (<= allocated) */
-    unsigned      max;
+    unsigned      max;       /* Maximal number of pending elements ever */
 } send_list_t;
 
 typedef struct topology_iterator {
