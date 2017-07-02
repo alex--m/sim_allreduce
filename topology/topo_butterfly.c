@@ -71,7 +71,6 @@ int butterfly_next(comm_graph_t *graph, send_list_t *in_queue,
         if (internal_ctx->next_child_index < internal_ctx->my_peers->node_count) {
             next_peer = internal_ctx->next_child_index++;
             next_peer = internal_ctx->my_peers->nodes[next_peer];
-            result->bitfield = BITFIELD_FILL_AND_SEND;
             result->msg = BUTTERFLY_MSG_DATA;
             result->dst = next_peer;
             return OK;
@@ -134,7 +133,6 @@ int butterfly_next(comm_graph_t *graph, send_list_t *in_queue,
     if (internal_ctx->next_child_index < internal_ctx->my_peers->node_count) {
         next_peer = internal_ctx->next_child_index++;
         result->dst = internal_ctx->my_peers->nodes[next_peer];
-        result->bitfield = BITFIELD_FILL_AND_SEND;
         result->msg = BUTTERFLY_MSG_DATA;
         return OK;
     }
@@ -145,7 +143,6 @@ int butterfly_next(comm_graph_t *graph, send_list_t *in_queue,
         next_peer = internal_ctx->next_child_index++;
         next_peer -= internal_ctx->my_peers->node_count;
         result->dst = internal_ctx->my_peers->nodes[next_peer];
-        result->bitfield = BITFIELD_FILL_AND_SEND;
         result->msg = BUTTERFLY_MSG_DATA;
         return OK;
     }

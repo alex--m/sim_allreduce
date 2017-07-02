@@ -134,8 +134,7 @@ int comm_graph_append(comm_graph_t* comm_graph, node_id src, node_id dst,
 
     /* Make the reverse connection in the graph */
     if ((comm_graph->is_bidirectional) &&
-        ((direction == COMM_GRAPH_CHILDREN) ||
-         (direction == COMM_GRAPH_MR_CHILDREN))) {
+        (direction == COMM_GRAPH_CHILDREN)) {
         node = &comm_graph->nodes[dst];
         COMM_GRAPH_DIRECTION_APPEND(node, COMM_GRAPH_FATHERS, src);
     }
@@ -178,10 +177,7 @@ int comm_graph_copy(comm_graph_t* comm_graph, node_id src, node_id dst,
     for (index = 0; index < source->node_count; index++) {
         node_id candidate = source->nodes[index];
         if (!comm_graph_is_duplicate(dst_node, candidate)) {
-            printf("\nADDING %lu as dir=%i to %lu", candidate, dst_direction, dst);
-            printf("\nBEFORE: node_count=%lu", dst_node->directions[dst_direction]->node_count);
             COMM_GRAPH_DIRECTION_APPEND(dst_node, dst_direction, candidate);
-            printf("\nAFTER: node_count=%lu", dst_node->directions[dst_direction]->node_count);
         }
     }
 

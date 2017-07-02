@@ -12,14 +12,16 @@ typedef struct stats {
 } stats_t;
 
 typedef struct raw_stats {
-    unsigned long step_counter;
+    unsigned long last_step_counter;
+    unsigned long first_step_counter;
     unsigned long messages_counter;
     unsigned long data_len_counter;
+    unsigned long max_queueu_len;
 } raw_stats_t;
 
 void stats_calc(struct stats *stats, unsigned long value);
 
-void stats_aggregate(struct stats *stats, int is_root, MPI_Comm comm);
+void stats_aggregate(struct stats *stats, int is_root);
 
 void stats_print(struct stats *stats);
 

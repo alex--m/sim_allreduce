@@ -65,28 +65,27 @@ int topology_iterator_create(topology_spec_t *spec,
 int topology_iterator_next(topology_spec_t *spec, topo_funcs_t *funcs,
                            topology_iterator_t *iterator, send_item_t *result)
 {
-    if (iterator->time_finished) {
+	comm_graph_t *graph = iterator->graph;
+    if ((iterator->time_finished) && (result->src != 0)) {
         return DONE;
     }
 
     result->distance = DISTANCE_SEND_NOW + spec->latency;
     switch (spec->model_type)
     {
-    case COLLECTIVE_MODEL_SPREAD: // TODO: problem: need to answer KAs during spread!
+    case COLLECTIVE_MODEL_SPREAD:
         if (iterator->time_offset) {
             iterator->time_offset--;
-            result->distance = DISTANCE_NO_PACKET;
             result->dst = DESTINATION_SPREAD;
-            return OK;
+            graph       = NULL; /* Triggers Keep-alive-only functionality */
         }
         break;
 
     case COLLECTIVE_MODEL_NODES_FAILING:
-    	// TODO: prevent #0 from dying!
         if ((spec->model.node_fail_rate > FLOAT_RANDOM(spec)) &&
         	(result->src != 0)) {
             result->distance = DISTANCE_NO_PACKET;
-            result->dst = DESTINATION_DEAD;
+            result->dst      = DESTINATION_DEAD;
             SET_DEAD(iterator);
             return DEAD; /* Triggers topology fix */
         }
@@ -95,7 +94,7 @@ int topology_iterator_next(topology_spec_t *spec, topo_funcs_t *funcs,
     case COLLECTIVE_MODEL_NODES_MISSING:
         if (IS_DEAD(iterator)) {
             result->distance = DISTANCE_NO_PACKET;
-            result->dst = DESTINATION_DEAD;
+            result->dst      = DESTINATION_DEAD;
             return OK;
         }
         break;
@@ -104,7 +103,7 @@ int topology_iterator_next(topology_spec_t *spec, topo_funcs_t *funcs,
         break;
     }
 
-    return funcs->next_f(iterator->graph, &iterator->in_queue, iterator->ctx, result);
+    return funcs->next_f(graph, &iterator->in_queue, iterator->ctx, result);
 }
 
 int topology_iterator_omit(topology_iterator_t *iterator, topo_funcs_t *funcs,

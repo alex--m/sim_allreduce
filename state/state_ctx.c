@@ -182,7 +182,9 @@ static inline int state_enqueue(state_t *state, send_item_t *sent, send_list_t *
     item = &list->items[slot_idx];
     memcpy(item, sent, offsetof(send_item_t, bitfield));
     memcpy(item->bitfield, sent->bitfield, slot_size);
-    list->used++;
+    if (list->max < list->used++) {
+    	list->max = list->used;
+    }
     return OK;
 }
 
@@ -209,7 +211,7 @@ static inline int state_process(state_t *state, send_item_t *incoming)
         if (IS_LIVE_HERE(incoming->bitfield)) {
             /* live A sends to live B */
 			incoming->distance = DISTANCE_SEND_NOW;
-			state_enqueue(state, incoming, &destination->in_queue);
+			ret_val = state_enqueue(state, incoming, &destination->in_queue);
 			incoming->distance = DISTANCE_VACANT;
         } else {
             /* dead A sends to live B - simulates timeout on B */
@@ -219,7 +221,6 @@ static inline int state_process(state_t *state, send_item_t *incoming)
             if (POPCOUNT(state, incoming->dst) == state->spec->node_count) {
             	SET_FULL(state, incoming->dst);
             }
-            // TODO: PROBLEM: if a dead X is marked "here", how do i wait for his children?!
         }
     }
 
@@ -239,6 +240,9 @@ static inline int state_dequeue(state_t *state)
         if (item->distance != DISTANCE_VACANT) {
             if (--item->distance == DISTANCE_VACANT) {
                 ret_val = state_process(state, item);
+                if (ret_val != OK) {
+                	return ret_val;
+                }
                 outq->used--;
             }
             used--;
@@ -257,7 +261,7 @@ int state_next_step(state_t *state)
     node_id dead_count    = 0;
     topology_spec_t *spec = state->spec;
     topo_funcs_t *funcs   = state->funcs;
-    node_id active_count  = spec->node_count;
+    node_id active_count  = spec->node_count - 1; // #0 is up forever
 
     /* Switch step matrix before starting next iteration */
     memcpy(state->old_matrix, state->new_matrix, CTX_MATRIX_SIZE(state));
@@ -271,21 +275,23 @@ int state_next_step(state_t *state)
     /* Iterate over all process-iterators */
     for (idx = 0; idx < state->spec->node_count; idx++) {
         topology_iterator_t *iterator = GET_ITERATOR(state, idx);
-        // TODO: if finished and not #0 - just skip it!
         if (IS_DEAD(iterator)) {
             res.distance = DISTANCE_NO_PACKET;
             res.dst = DESTINATION_DEAD;
             dead_count++;
             ret_val = OK; // For verbose mode
+        } else if (iterator->time_finished) {
+        	/* Already complete (for this node) */
+        	ret_val = DONE;
+            active_count--;
         } else {
             /* Get next the target rank of the next send */
         	res.src = idx; /* Also used for "protecting" #0 from death */
             ret_val = topology_iterator_next(spec, funcs, iterator, &res);
             if (ret_val != OK) {
                 if (ret_val == DONE) {
-                    if (iterator->time_finished == 0) {
-                        iterator->time_finished = state->spec->step_index;
-                    }
+                    assert(iterator->time_finished == 0);
+                    iterator->time_finished = state->spec->step_index;
                     active_count--;
                 } else if (ret_val == DEAD) {
                     UNSET_LIVE(state, idx);
@@ -300,7 +306,6 @@ int state_next_step(state_t *state)
             	} else {
             		/* Send this outgoing packet */
             		res.src = idx;
-            		assert(res.bitfield == BITFIELD_FILL_AND_SEND);
             		res.bitfield = GET_OLD_BITFIELD(state, idx);
             		ret_val = state_enqueue(state, &res, NULL);
             		if (ret_val != OK) {
@@ -342,7 +347,27 @@ int state_next_step(state_t *state)
     }
 
     if ((active_count - dead_count) == 0) {
-        state->stats.step_counter = state->spec->step_index;
+    	topology_iterator_t *iterator   = GET_ITERATOR(state, 0);
+        state->stats.max_queueu_len     = iterator->in_queue.max;
+        state->stats.last_step_counter  = state->spec->step_index;
+        state->stats.first_step_counter = iterator->time_finished;
+
+        /* Find longest queue ever */
+        for (idx = 1; idx < state->spec->node_count; idx++) {
+        	iterator = GET_ITERATOR(state, idx);
+        	if (state->stats.max_queueu_len < iterator->in_queue.max) {
+        		state->stats.max_queueu_len = iterator->in_queue.max;
+        	}
+        }
+
+        /* Find earliest finisher ever */
+        for (idx = 1; idx < state->spec->node_count; idx++) {
+        	iterator = GET_ITERATOR(state, idx);
+        	if (state->stats.first_step_counter < iterator->time_finished) {
+        		state->stats.first_step_counter = iterator->time_finished;
+        	}
+        }
+
         return DONE;
     }
     return OK;

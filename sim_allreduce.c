@@ -25,8 +25,10 @@ typedef struct sim_spec
     unsigned mpi_size;
 
     stats_t steps;
+    stats_t spread;
     stats_t data;
     stats_t msgs;
+    stats_t queue;
 } sim_spec_t;
 
 /*****************************************************************************\
@@ -70,7 +72,7 @@ int sim_test_iteration(sim_spec_t *spec, raw_stats_t *stats)
             spec->topology.step_index++;
 
             /* Sanity check: make sure we're not stuck indefinitely! */
-            if ((spec->node_count < 9) && (spec->topology.step_index > 100)) {
+            if ((spec->node_count < 17) && (spec->topology.step_index > 400)) {
             	return ERROR;
             }
         }
@@ -108,8 +110,10 @@ int sim_test(sim_spec_t *spec)
     /* Prepare for subsequent test iterations */
     spec->topology.node_count = spec->node_count;
     memset(&spec->steps, 0, sizeof(stats_t));
+    memset(&spec->spread, 0, sizeof(stats_t));
     memset(&spec->msgs, 0, sizeof(stats_t));
     memset(&spec->data, 0, sizeof(stats_t));
+    memset(&spec->queue, 0, sizeof(stats_t));
 
     for (test_index = 0;
          ((test_index < my_test_count) && (ret_val == OK));
@@ -119,21 +123,25 @@ int sim_test(sim_spec_t *spec)
         ret_val = sim_test_iteration(spec, &raw);
 
         /* Collect statistics */
-        stats_calc(&spec->steps, raw.step_counter);
-        stats_calc(&spec->msgs, raw.messages_counter);
-        stats_calc(&spec->data, raw.data_len_counter);
+        stats_calc(&spec->steps,  raw.last_step_counter);
+        stats_calc(&spec->spread, raw.last_step_counter - raw.first_step_counter);
+        stats_calc(&spec->msgs,   raw.messages_counter);
+        stats_calc(&spec->data,   raw.data_len_counter);
+        stats_calc(&spec->queue,  raw.max_queueu_len);
     }
 
     /* If multiple tests were done on multiple processes - aggregate */
     if (spec->mpi_size > 1) {
-        stats_aggregate(&spec->steps, is_root, MPI_COMM_WORLD);
-        stats_aggregate(&spec->msgs, is_root, MPI_COMM_WORLD);
-        stats_aggregate(&spec->data, is_root, MPI_COMM_WORLD);
+        stats_aggregate(&spec->steps,  is_root);
+        stats_aggregate(&spec->spread, is_root);
+        stats_aggregate(&spec->msgs,   is_root);
+        stats_aggregate(&spec->data,   is_root);
+        stats_aggregate(&spec->queue,  is_root);
     }
 
     if (is_root) {
         if (spec->topology.verbose) {
-            printf("N=%lu M=%u Topo=%u Radix=%u Spread=%lu Fail%%=%.1f Steps(Avg.)=%lu\n",
+            printf("N=%lu M=%u Topo=%u Radix=%u Spread=%lu Fail%%=%.1f Steps(Avg.)=%lu (Out-)Spread(Avg.)=%lu Max-Queue-len=%lu\n",
                     spec->node_count,
                     spec->topology.model_type,
                     spec->topology.topology_type,
@@ -143,7 +151,9 @@ int sim_test(sim_spec_t *spec)
                     ((spec->topology.model_type == COLLECTIVE_MODEL_NODES_MISSING) ||
                      (spec->topology.model_type == COLLECTIVE_MODEL_NODES_FAILING)) ?
                             spec->topology.model.node_fail_rate : 0,
-                    spec->steps.sum / spec->steps.cnt);
+                    spec->steps.sum / spec->steps.cnt,
+					spec->spread.sum / spec->spread.cnt,
+					spec->queue.max);
         } else {
             printf("%lu,%u,%u,%u,%lu,%.1f,%.1f,%u",
                     spec->node_count,
@@ -158,8 +168,10 @@ int sim_test(sim_spec_t *spec)
                             spec->topology.model.node_fail_rate : 0,
                             total_test_count);
             stats_print(&spec->steps);
+            stats_print(&spec->spread);
             stats_print(&spec->msgs);
             stats_print(&spec->data);
+            stats_print(&spec->queue);
             if (ret_val != OK) {
                 printf(" - ERROR!");
             }
@@ -502,8 +514,8 @@ int main(int argc, char **argv)
         if (!spec.topology.verbose) {
             /* CSV header */
             printf("np,model,topo,radix,max_offset,max_delay,"
-                    "fails,runs,min_steps,max_steps,steps_avg,"
-                    "min_msgs,max_msgs,msgs_avg,min_data,max_data,data_avg\n");
+                   "fails,runs,min_steps,max_steps,steps_avg,min_spread,max_spread,spread_avg,"
+                   "min_msgs,max_msgs,msgs_avg,min_data,max_data,data_avg,min_queue,max_queue,queue_avg\n");
         }
     }
 

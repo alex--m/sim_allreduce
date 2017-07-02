@@ -42,6 +42,7 @@ typedef struct tree_context {
     unsigned order_indicator;
     unsigned next_wait_index;
     unsigned next_send_index;
+    int is_resend;
 
     unsigned contacts_used;
     tree_contact_t *contacts;
@@ -50,10 +51,12 @@ typedef struct tree_context {
 
 enum tree_msg_type {
     TREE_MSG_DATA          = 0,
-#define TREE_MSG_DATA(distance) (TREE_MSG_DATA          + TREE_MSG_MAX * distance)
-    TREE_MSG_KEEPALIVE     = 1,
-#define TREE_MSG_KA(distance)   (TREE_MSG_KEEPALIVE     + TREE_MSG_MAX * distance)
-    TREE_MSG_MAX           = 2,
+#define TREE_MSG_DATA(distance)   (TREE_MSG_DATA          + TREE_MSG_MAX * distance)
+	TREE_MSG_REDATA        = 1,
+#define TREE_MSG_REDATA(distance) (TREE_MSG_REDATA        + TREE_MSG_MAX * distance)
+    TREE_MSG_KEEPALIVE     = 2,
+#define TREE_MSG_KA(distance)     (TREE_MSG_KEEPALIVE     + TREE_MSG_MAX * distance)
+    TREE_MSG_MAX           = 3,
 };
 
 enum tree_action {
@@ -68,15 +71,24 @@ struct order {
 };
 
 struct order tree_order[] = {
+		/* First - wait for children */
         {COMM_GRAPH_CHILDREN,       TREE_RECV},
-#define ORDER_SUBTREE_DONE (0)
+        {COMM_GRAPH_EXTRA_CHILDREN, TREE_RECV},
+#define ORDER_SUBTREE_DONE (1)
+
+		/* Then - send to fathers (up the tree) */
         {COMM_GRAPH_FATHERS,        TREE_SEND},
         {COMM_GRAPH_EXTRA_FATHERS,  TREE_SEND},
-        {COMM_GRAPH_MR_CHILDREN,    TREE_RECV},
+
+		/* Next - wait for results (for verbose mode) */
         {COMM_GRAPH_FATHERS,        TREE_RECV},
         {COMM_GRAPH_EXTRA_FATHERS,  TREE_RECV},
-        {COMM_GRAPH_EXCLUDE,        TREE_WAIT},
-        {COMM_GRAPH_CHILDREN,       TREE_SEND},
+
+		/* "meta-step" - make sure everybody made it */
+		{COMM_GRAPH_EXCLUDE,        TREE_WAIT},
+
+		/* Finally - send to children (down the tree) */
+		{COMM_GRAPH_CHILDREN,       TREE_SEND},
         {COMM_GRAPH_EXTRA_CHILDREN, TREE_SEND}
 };
 
@@ -278,8 +290,6 @@ static inline int tree_next_by_topology(comm_graph_t *graph,
                 }
             }
 
-            // TODO: wait on (adopted) sons!!! (first wait on subtree - especially if one of the sons dies)
-
             if (wait_index >= dir_ptr->node_count) {
                 wait_index -= dir_ptr->node_count;
             }
@@ -288,6 +298,7 @@ static inline int tree_next_by_topology(comm_graph_t *graph,
         case TREE_SEND:
             if (send_index < dir_ptr->node_count) {
             	do {
+                    ctx->next_send_index++;
 					next_peer = dir_ptr->nodes[send_index++];
 					ret = tree_contact_lookup(ctx, next_peer, DISTANCE_VACANT, &contact);
             	} while ((ret == DONE) && (send_index < dir_ptr->node_count));
@@ -307,10 +318,9 @@ static inline int tree_next_by_topology(comm_graph_t *graph,
                 contact->last_sent   = current_step_index;
                 contact->his_timeout = TIMEOUT_NEVER;
                 result->timeout      = timeout - result->distance;
-                result->msg          = TREE_MSG_DATA(contact->distance);
-                result->bitfield     = BITFIELD_FILL_AND_SEND; // TODO: Stop using this value (remove assert too)
+                result->msg          = ctx->is_resend ? TREE_MSG_REDATA(contact->distance) :
+                		                                TREE_MSG_DATA(contact->distance);
                 result->dst          = next_peer;
-                ctx->next_send_index++;
                 return TREE_PACKET_CHOSEN;
             } else {
                 send_index -= dir_ptr->node_count;
@@ -327,8 +337,8 @@ static inline int tree_next_by_topology(comm_graph_t *graph,
         }
     }
 
-    /* No more packets to send - we're done here! */
-    return DONE;
+    /* No more packets to send - we're done here! (unless it's the master) */
+    return (ctx->my_node != 0) ? DONE : OK;
 }
 
 static inline int tree_handle_incoming_packet(tree_context_t *ctx,
@@ -347,9 +357,18 @@ static inline int tree_handle_incoming_packet(tree_context_t *ctx,
     contact->timeout     = TIMEOUT_NEVER;
     contact->last_seen   = *ctx->step_index;
     contact->his_timeout = tree_calc_timeout(ctx, msg_distance) - ctx->latency;
-    if (msg_type == TREE_MSG_KEEPALIVE) {
+    switch (msg_type){
+    case TREE_MSG_REDATA:
+    	ctx->next_send_index = 0;
+    	ctx->is_resend = 1;
+    	break;
+
+    case TREE_MSG_KEEPALIVE:
         /* Prevent keep=alive messages passing data */
-        return DONE; // TODO: make this abuse more elegant?
+        return DONE;
+
+    default:
+    	break;
     }
     return OK;
 }
@@ -401,7 +420,8 @@ static inline int tree_pending_keepalives(tree_context_t *ctx, step_num *eta,
     for (idx = 0; idx < ctx->contacts_used; idx++) {
         contact = &ctx->contacts[idx];
         if (((contact->distance == distance) || (distance == ANY_DISTANCE)) &&
-            (contact->his_timeout != TIMEOUT_NEVER)) {
+        	(contact->his_timeout != TIMEOUT_NEVER) &&
+            (contact->distance != DISTANCE_VACANT)) {
             if (!max_urgency) {
                 max_urgency = contact;
             } else if (max_urgency->his_timeout > contact->his_timeout) {
@@ -424,7 +444,8 @@ static inline int tree_pending_keepalives(tree_context_t *ctx, step_num *eta,
             contact = &ctx->contacts[idx];
             if (((contact->distance == distance) ||
                  (distance == ANY_DISTANCE)) &&
-                (contact->his_timeout != TIMEOUT_NEVER)) {
+                (contact->his_timeout != TIMEOUT_NEVER) &&
+                (contact->distance != DISTANCE_VACANT)) {
                 goto send_keepalive;
             }
         }
@@ -438,7 +459,6 @@ send_keepalive:
     contact->timeout     = current_step_index + timeout;
     contact->last_sent   = current_step_index;
     contact->his_timeout = TIMEOUT_NEVER;
-    result->bitfield     = BITFIELD_FILL_AND_SEND;
     result->msg          = TREE_MSG_KA(contact->distance);
     result->timeout      = timeout - result->distance;
     result->dst          = contact->node;
@@ -451,13 +471,20 @@ int tree_next(comm_graph_t *graph, send_list_t *in_queue,
     tree_distance_t distance;
     int ret;
 
-    /* Step #0: Assert algorithm's assumptions */
+    /* Before starting - assert algorithm assumptions to be valid */
     // TODO: tree_validate(ctx);
+
+    /* Step #1: If considered still in "computation" - respond only to keep-alives */
+    if (graph == NULL) {
+    	if (!queue_get_msg_by_distance(ctx, in_queue, TREE_MSG_KEEPALIVE, ANY_DISTANCE, result)) {
+    	    result->distance = DISTANCE_NO_PACKET;
+    	}
+    	return OK;
+    }
 
     /* Step #1: If data can be sent - send it! (w/o reading incoming messages) */
     ret = tree_next_by_topology(graph, ctx, result);
     if (ret == TREE_PACKET_CHOSEN) {
-        assert(result->bitfield == BITFIELD_FILL_AND_SEND);
         return OK;
     }
     if (ret != OK) {
@@ -470,6 +497,7 @@ int tree_next(comm_graph_t *graph, send_list_t *in_queue,
 service_distance:
     /* Step #3: Data (from service-distance) comes first, then keep-alives */
     if (queue_get_msg_by_distance(ctx, in_queue, TREE_MSG_DATA, distance, result) ||
+    	queue_get_msg_by_distance(ctx, in_queue, TREE_MSG_REDATA, distance, result) ||
         queue_get_msg_by_distance(ctx, in_queue, TREE_MSG_KEEPALIVE, distance, result)) {
         assert(result->src != ctx->my_node);
         return OK;
@@ -478,7 +506,6 @@ service_distance:
     /* Step #4: If its time is up - send a keep-alive within service-distance */
     ret = tree_pending_keepalives(ctx, graph->nodes[ctx->my_node].data_eta, distance, result);
     if (ret == TREE_PACKET_CHOSEN) {
-        assert(result->bitfield == BITFIELD_FILL_AND_SEND);
         return OK;
     }
     if (ret != OK) {
@@ -529,21 +556,19 @@ int tree_fix(comm_graph_t *graph, tree_context_t *ctx,
             is_father_dead = 1;
         }
     }
-    dir = graph->nodes[me].directions[COMM_GRAPH_MR_CHILDREN];
-    for (idx = 0; idx < dir->node_count; idx++) {
-        if (dir->nodes[idx] == dead) {
-            is_father_dead = 0;
-        }
-    }
 
     /* Find the dead contact */
     ret = tree_contact_lookup(ctx, dead, DISTANCE_VACANT, &contact);
     if (ret != OK) {
+    	if (ret == DONE) {
+    		/* If a KA was followed by DATA - a node could be marked twice as dead */
+    		return OK;
+    	}
         return ret;
     }
     dead_distance = contact->distance + 1;
 
-    printf("\nOMIT: %lu omits %lu (%i)", ctx->my_node, dead, is_father_dead); // TODO: remove!
+    //printf("\nOMIT: %lu omits %lu (%i)", ctx->my_node, dead, is_father_dead); // TODO: remove!
 
     /* Restructure the tree to disregard the dead node */
     switch (recovery) {
@@ -552,63 +577,36 @@ int tree_fix(comm_graph_t *graph, tree_context_t *ctx,
         /* calc brother - reverse BFS */
         /* add brother as father, myself as his child */
     case COLLECTIVE_RECOVERY_FATHER_FIRST:
-        if (is_father_dead) {
-            /* the dead node is above me in the tree: */
-            if (comm_graph_count(graph, dead, COMM_GRAPH_FATHERS) == 0) {
-            	/* Update send index to point to the newly added nodes */
-                idx = graph->nodes[me].directions[COMM_GRAPH_EXTRA_FATHERS]->node_count;
-                ctx->next_send_index = idx + graph->nodes[me].directions[COMM_GRAPH_EXTRA_FATHERS]->node_count;
+        if ((is_father_dead) && (ctx->my_node != 0)) {
+        	/* the dead node is above me in the tree - join the first father */
+        	node_id new_father = graph->nodes[dead].directions[COMM_GRAPH_FATHERS]->nodes[0];
 
-                /* if the dead has no fathers - add his children to COMM_GRAPH_EXTRA_FATHERS and me as their son */
-                ret = comm_graph_copy(graph, dead, ctx->my_node, COMM_GRAPH_CHILDREN, COMM_GRAPH_EXTRA_FATHERS);
-                if (ret != OK) {
-                    return ret;
-                }
-                printf("\nOMM_GRAPH_EXTRA_FATHERS grows from %lu to %lu!", idx, graph->nodes[me].directions[COMM_GRAPH_EXTRA_FATHERS]->node_count);
-                for (; idx < graph->nodes[me].directions[COMM_GRAPH_EXTRA_FATHERS]->node_count; idx++) {
-                    extra = graph->nodes[me].directions[COMM_GRAPH_EXTRA_FATHERS]->nodes[idx];
-                    ret = tree_contact_lookup(ctx, extra, dead_distance, &contact);
-                    if (ret != OK) {
-                        return ret;
-                    }
-                }
+        	/* Check if the new father is also an existing father */
+            dir = graph->nodes[me].directions[COMM_GRAPH_FATHERS];
+        	for (idx = 0; ((idx < dir->node_count) && (dir->nodes[idx] != new_father)); idx++);
+        	if (idx < dir->node_count) {
+        		break;
+        	}
 
-                /* add his multi-root children to COMM_GRAPH_EXTRA_FATHERS and me as their son */
-                ret = comm_graph_copy(graph, dead, ctx->my_node, COMM_GRAPH_MR_CHILDREN, COMM_GRAPH_EXTRA_FATHERS);
-                if (ret != OK) {
-                    return ret;
-                }
-                printf("\nCOMM_GRAPH_EXTRA_FATHERS grows from %lu to %lu!", idx, graph->nodes[me].directions[COMM_GRAPH_EXTRA_FATHERS]->node_count);
-                for (; idx < graph->nodes[me].directions[COMM_GRAPH_EXTRA_FATHERS]->node_count; idx++) {
-                    extra = graph->nodes[me].directions[COMM_GRAPH_EXTRA_FATHERS]->nodes[idx];
-                    ret = tree_contact_lookup(ctx, extra, dead_distance, &contact);
-                    if (ret != OK) {
-                        return ret;
-                    }
-                }
-            } else {
-                /* add the dead's fathers to COMM_GRAPH_EXTRA_FATHERS, and me as their son */
-                idx = graph->nodes[me].directions[COMM_GRAPH_EXTRA_FATHERS]->node_count;
-                ret = comm_graph_copy(graph, dead, ctx->my_node, COMM_GRAPH_FATHERS, COMM_GRAPH_EXTRA_FATHERS);
-                if (ret != OK) {
-                    return ret;
-                }
-                for (; idx < graph->nodes[me].directions[COMM_GRAPH_EXTRA_FATHERS]->node_count; idx++) {
-                    extra = graph->nodes[me].directions[COMM_GRAPH_EXTRA_FATHERS]->nodes[idx];
-                    ret = tree_contact_lookup(ctx, extra, dead_distance, &contact);
-                    if (ret != OK) {
-                        return ret;
-                    }
-                }
-            }
+        	/* Add the new father to the list */
+        	ret = comm_graph_append(graph, me, new_father, COMM_GRAPH_EXTRA_FATHERS);
+        	if (ret != OK) {
+        		return ret;
+        	}
+
+        	/* Set the distance for the new father */
+        	ret = tree_contact_lookup(ctx, new_father, dead_distance, &contact);
+        	if (ret != OK) {
+        		return ret;
+        	}
         } else {
-            /* the dead node is a child - adopt his children */
+            /* the dead node is in my sub-tree - adopt his children */
             idx = graph->nodes[me].directions[COMM_GRAPH_EXTRA_CHILDREN]->node_count;
             ret = comm_graph_copy(graph, dead, ctx->my_node, COMM_GRAPH_CHILDREN, COMM_GRAPH_EXTRA_CHILDREN);
             if (ret != OK) {
                 return ret;
             }
-            printf("\nCOMM_GRAPH_EXTRA_CHILDREN grows from %lu to %lu!", idx, graph->nodes[me].directions[COMM_GRAPH_EXTRA_CHILDREN]->node_count);
+
             for (; idx < graph->nodes[me].directions[COMM_GRAPH_EXTRA_CHILDREN]->node_count; idx++) {
                 extra = graph->nodes[me].directions[COMM_GRAPH_EXTRA_CHILDREN]->nodes[idx];
                 ret = tree_contact_lookup(ctx, extra, dead_distance, &contact);
@@ -616,6 +614,9 @@ int tree_fix(comm_graph_t *graph, tree_context_t *ctx,
                     return ret;
                 }
             }
+
+            /* Reset send counter - need to resent all the data! */
+            ctx->next_send_index = 0;
         }
         break;
 
@@ -681,7 +682,7 @@ int tree_build(topology_spec_t *spec, comm_graph_t **graph)
         for (next_father = 0; next_father < tree_radix; next_father++) {
             for (next_child = 0; next_child < tree_radix; next_child++) {
                 if (next_father != next_child) {
-                    ret = comm_graph_append(*graph, next_father, next_child, COMM_GRAPH_MR_CHILDREN);
+                    ret = comm_graph_append(*graph, next_father, next_child, COMM_GRAPH_FATHERS);
                     if (ret != OK) {
                         comm_graph_destroy(*graph);
                         return ret;
@@ -730,33 +731,29 @@ int tree_build(topology_spec_t *spec, comm_graph_t **graph)
 
         /* Set the ETA for all the children */
         (*graph)->nodes[first_child].data_eta[DATA_ETA_SUBTREE] =
-                dir->node_count ? eta + spec->latency + 1 : 0;
+                dir->node_count ? eta + spec->latency + 2 : 0;
     }
 
 
     if (is_multiroot) {
-        step_num child_eta, eta = 0;
-        comm_graph_direction_ptr_t dir;
-
         /* Find the "multi-root" child (for a root - other roots) arriving last */
-        for (first_child = 0; first_child < tree_radix; first_child++) {
-            dir = (*graph)->nodes[first_child].directions[COMM_GRAPH_MR_CHILDREN];
-            for (next_child = 0; next_child < dir->node_count; next_child++) {
-                child_eta = (*graph)->nodes[dir->nodes[next_child]].data_eta[DATA_ETA_SUBTREE];
-                if (child_eta > eta) {
-                    eta = child_eta;
-                }
-            }
+        step_num child_eta, eta = (*graph)->nodes[0].data_eta[DATA_ETA_SUBTREE];
+        comm_graph_direction_ptr_t dir = (*graph)->nodes[0].directions[COMM_GRAPH_FATHERS];
+        for (next_child = 0; next_child < dir->node_count; next_child++) {
+        	child_eta = (*graph)->nodes[dir->nodes[next_child]].data_eta[DATA_ETA_SUBTREE];
+        	if (child_eta > eta) {
+        		eta = child_eta;
+        	}
         }
 
         /* Set the ETA for all the roots */
-        eta += spec->latency + 1;
+        eta += spec->latency + 1 + dir->node_count;
         for (first_child = 0; first_child < tree_radix; first_child++) {
-            (*graph)->nodes[first_child].data_eta[DATA_ETA_FULL_TREE] = (eta++);
+            (*graph)->nodes[first_child].data_eta[DATA_ETA_FULL_TREE] = eta;
         }
     } else {
         (*graph)->nodes[0].data_eta[DATA_ETA_FULL_TREE] =
-        (*graph)->nodes[0].data_eta[DATA_ETA_SUBTREE]; // TODO: make the bound later - so not to waste KA messages
+        (*graph)->nodes[0].data_eta[DATA_ETA_SUBTREE];
         first_child = 1;
     }
 
@@ -765,7 +762,7 @@ int tree_build(topology_spec_t *spec, comm_graph_t **graph)
         step_num eta = (*graph)->nodes[first_child].data_eta[DATA_ETA_FULL_TREE] + spec->latency + 2;
         comm_graph_direction_ptr_t dir = (*graph)->nodes[first_child].directions[COMM_GRAPH_CHILDREN];
         for (next_child = 0; next_child < dir->node_count; next_child++) {
-            (*graph)->nodes[dir->nodes[next_child]].data_eta[DATA_ETA_FULL_TREE] = (eta++);  // TODO: make the bound later - so not to waste KA messages
+            (*graph)->nodes[dir->nodes[next_child]].data_eta[DATA_ETA_FULL_TREE] = (eta++);
         }
     }
 

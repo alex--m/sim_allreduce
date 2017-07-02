@@ -88,7 +88,6 @@ typedef struct send_item {
     step_num      timeout;   /* packet timeout (after which consider peer dead),
                                 after subtracting the initial send distance */
     unsigned char *bitfield; /* pointer to the packet data - MUST BE LAST MEMBER */
-#define           BITFIELD_FILL_AND_SEND (NULL)
 #define           BITFIELD_IGNORE_DATA   (NULL)
 } send_item_t;
 
@@ -97,6 +96,7 @@ typedef struct send_list {
     unsigned char *data;     /* Array of stored data (matches items array) */
     unsigned      allocated; /* Number of items allocated in memory */
     unsigned      used;      /* Number of items used (<= allocated) */
+    unsigned      max;
 } send_list_t;
 
 typedef struct topology_iterator {
