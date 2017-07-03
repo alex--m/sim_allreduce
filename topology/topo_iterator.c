@@ -18,6 +18,7 @@ size_t topology_iterator_size()
             max = slot_size;
         }
     }
+    assert(current_topology == NULL);
     return max + sizeof(topology_iterator_t);
 }
 
@@ -46,12 +47,6 @@ int topology_iterator_create(topology_spec_t *spec,
             (spec->model_type == COLLECTIVE_MODEL_SPREAD) ?
             CYCLIC_RANDOM(spec, spec->model.max_spread) : 0;
     memset(&iterator->in_queue, 0, sizeof(iterator->in_queue));
-    if ((spec->model_type == COLLECTIVE_MODEL_NODES_MISSING) &&
-        (spec->model.node_fail_rate > FLOAT_RANDOM(spec)) &&
-		(spec->my_rank != 0)) {
-        SET_DEAD(iterator);
-        return DEAD;
-    }
 
     ret_val = comm_graph_append(current_topology, spec->my_rank,
                                 spec->my_rank, COMM_GRAPH_EXCLUDE);
@@ -59,7 +54,16 @@ int topology_iterator_create(topology_spec_t *spec,
         return ret_val;
     }
 
-    return funcs->start_f(spec, current_topology, &iterator->ctx[0]);
+    ret_val = funcs->start_f(spec, current_topology, iterator->ctx);
+
+    if ((spec->model_type == COLLECTIVE_MODEL_NODES_MISSING) &&
+        (spec->model.node_fail_rate > FLOAT_RANDOM(spec)) &&
+		(spec->my_rank != 0)) {
+        SET_DEAD(iterator);
+        return DEAD;
+    }
+
+    return ret_val;
 }
 
 int topology_iterator_next(topology_spec_t *spec, topo_funcs_t *funcs,
@@ -112,7 +116,7 @@ int topology_iterator_omit(topology_iterator_t *iterator, topo_funcs_t *funcs,
     return funcs->fix_f(iterator->graph, iterator->ctx, method, broken);
 }
 
-void topology_iterator_destroy(topology_iterator_t *iterator)
+void topology_iterator_destroy(topology_iterator_t *iterator, topo_funcs_t *funcs)
 {
     if (iterator->in_queue.allocated) {
         free(iterator->in_queue.items);
@@ -121,6 +125,8 @@ void topology_iterator_destroy(topology_iterator_t *iterator)
         iterator->in_queue.data = NULL;
         iterator->in_queue.allocated = 0;
     }
+
+    funcs->stop_f(iterator->ctx);
 
     if (iterator->graph && (iterator->graph != current_topology)) {
         comm_graph_destroy(iterator->graph);

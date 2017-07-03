@@ -38,7 +38,7 @@ int state_create(topology_spec_t *spec, state_t *old_state, state_t **new_state)
         memset(ctx->old_matrix, 0, CTX_MATRIX_SIZE(ctx));
         memset(&ctx->stats, 0, sizeof(ctx->stats));
         for (index = 0; index < spec->node_count; index++) {
-            topology_iterator_destroy(GET_ITERATOR(ctx, index));
+            topology_iterator_destroy(GET_ITERATOR(ctx, index), ctx->funcs);
         }
     } else {
         ctx = calloc(1, sizeof(*ctx));
@@ -354,6 +354,7 @@ int state_next_step(state_t *state)
         state->stats.max_queueu_len     = iterator->in_queue.max;
         state->stats.last_step_counter  = state->spec->step_index;
         state->stats.first_step_counter = iterator->time_finished;
+        state->stats.death_toll         = dead_count;
 
         /* Find longest queue ever */
         for (idx = 1; idx < state->spec->node_count; idx++) {
@@ -384,31 +385,31 @@ int state_get_raw_stats(state_t *state, raw_stats_t *stats)
 }
 
 /* Destroy state state_t*/
-void state_destroy(state_t *state)
+void state_destroy(state_t *ctx)
 {
-    if (!state) {
+    if (!ctx) {
         return;
     }
 
-    if (state->procs) {
+    if (ctx->procs) {
         unsigned i;
-        for (i = 0; i < state->spec->node_count; i++) {
-            topology_iterator_destroy(GET_ITERATOR(state, i));
+        for (i = 0; i < ctx->spec->node_count; i++) {
+            topology_iterator_destroy(GET_ITERATOR(ctx, i), ctx->funcs);
         }
-        free(state->procs);
+        free(ctx->procs);
     }
 
-    if (state->outq.allocated) {
-        free(state->outq.items);
-        free(state->outq.data);
-        state->outq.allocated = 0;
-        state->outq.used = 0;
+    if (ctx->outq.allocated) {
+        free(ctx->outq.items);
+        free(ctx->outq.data);
+        ctx->outq.allocated = 0;
+        ctx->outq.used = 0;
     }
-    if (state->old_matrix) {
-        free(state->old_matrix);
+    if (ctx->old_matrix) {
+        free(ctx->old_matrix);
     }
-    if (state->new_matrix) {
-        free(state->new_matrix);
+    if (ctx->new_matrix) {
+        free(ctx->new_matrix);
     }
-    free(state);
+    free(ctx);
 }

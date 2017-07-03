@@ -17,6 +17,7 @@ typedef struct raw_stats {
     unsigned long messages_counter;
     unsigned long data_len_counter;
     unsigned long max_queueu_len;
+    unsigned long death_toll;
 } raw_stats_t;
 
 void stats_calc(struct stats *stats, unsigned long value);

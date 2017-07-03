@@ -59,6 +59,11 @@ int butterfly_start(topology_spec_t *spec, comm_graph_t *graph,
     return OK;
 }
 
+void butterfly_stop(struct butterfly_ctx *internal_ctx)
+{
+	return;
+}
+
 int butterfly_next(comm_graph_t *graph, send_list_t *in_queue,
                    struct butterfly_ctx *internal_ctx, send_item_t *result)
 {

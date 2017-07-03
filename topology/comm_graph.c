@@ -75,13 +75,12 @@ comm_graph_t* comm_graph_clone(comm_graph_t* original)
         for (direction_index = 0;
              direction_index < COMM_GRAPH_MAX_DIMENTIONS;
              direction_index++) {
-            comm_graph_direction_t *direction, *new_direction;
+            comm_graph_direction_ptr_t direction, new_direction;
             direction = node->directions[direction_index];
 
             size_t direction_size = sizeof(comm_graph_direction_t)
-                    + direction->arr_length * sizeof(node_id);
+                    + ((direction->arr_length - 1) * sizeof(node_id));
             new_direction = malloc(direction_size);
-
             if (!new_direction) {
                 comm_graph_destroy(res);
                 return NULL;
@@ -154,6 +153,7 @@ static int comm_graph_is_duplicate(comm_graph_node_t *dst, node_id addition)
 	comm_graph_direction_ptr_t dir;
 	enum comm_graph_direction_type dir_type;
 	for (dir_type = 0; dir_type < COMM_GRAPH_MAX_DIMENTIONS; dir_type++) {
+		// TODO: reuse COMM_GRAPH_LOCATE()
 		dir = dst->directions[dir_type];
 		for (idx = 0; idx < dir->node_count; idx++) {
 			if (dir->nodes[idx] == addition) {

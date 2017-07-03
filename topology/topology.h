@@ -79,6 +79,7 @@ typedef struct send_item {
 #define           DESTINATION_UNKNOWN ((node_id)-1)
 #define           DESTINATION_SPREAD  ((node_id)-2)
 #define           DESTINATION_DEAD    ((node_id)-3)
+#define           DESTINATION_IDLE    ((node_id)-4)
     node_id       src;       /* packet source (sender) */
     msg_type      msg;       /* packet type (per-protocol) */
     step_num      distance;  /* packet distance (time to be delayed in queue) */
@@ -124,6 +125,7 @@ typedef struct topo_funcs
                      void *internal_ctx, send_item_t *result);
     int    (*fix_f)(comm_graph_t *graph, void *internal_ctx,
                     tree_recovery_method_t method, node_id broken);
+    void   (*stop_f)(void *internal_ctx);
 } topo_funcs_t;
 
 #define IS_DEAD(iterator) (iterator->time_offset == TIME_OFFSET_DEAD)
@@ -141,4 +143,4 @@ int topology_iterator_next(topology_spec_t *spec, topo_funcs_t *funcs,
 int topology_iterator_omit(topology_iterator_t *iterator, topo_funcs_t *funcs,
                            tree_recovery_method_t method, node_id broken);
 
-void topology_iterator_destroy(topology_iterator_t *iterator);
+void topology_iterator_destroy(topology_iterator_t *iterator, topo_funcs_t *funcs);

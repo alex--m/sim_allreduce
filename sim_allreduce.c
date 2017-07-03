@@ -3,7 +3,7 @@
 
 #define PERROR printf
 
-#define DEFAULT_TEST_COUNT (10)
+#define DEFAULT_TEST_COUNT (1000)
 
 #define _GNU_SOURCE
 #include <stdio.h>
@@ -29,6 +29,7 @@ typedef struct sim_spec
     stats_t data;
     stats_t msgs;
     stats_t queue;
+    stats_t dead;
 } sim_spec_t;
 
 /*****************************************************************************\
@@ -72,7 +73,7 @@ int sim_test_iteration(sim_spec_t *spec, raw_stats_t *stats)
             spec->topology.step_index++;
 
             /* Sanity check: make sure we're not stuck indefinitely! */
-            if ((spec->node_count < 17) && (spec->topology.step_index > 400)) {
+            if ((spec->node_count * 10 < spec->topology.step_index)) {
             	return ERROR;
             }
         }
@@ -128,6 +129,7 @@ int sim_test(sim_spec_t *spec)
         stats_calc(&spec->msgs,   raw.messages_counter);
         stats_calc(&spec->data,   raw.data_len_counter);
         stats_calc(&spec->queue,  raw.max_queueu_len);
+        stats_calc(&spec->dead,   raw.death_toll);
     }
 
     /* If multiple tests were done on multiple processes - aggregate */
@@ -137,11 +139,12 @@ int sim_test(sim_spec_t *spec)
         stats_aggregate(&spec->msgs,   is_root);
         stats_aggregate(&spec->data,   is_root);
         stats_aggregate(&spec->queue,  is_root);
+        stats_aggregate(&spec->dead,   is_root);
     }
 
     if (is_root) {
         if (spec->topology.verbose) {
-            printf("N=%lu M=%u Topo=%u Radix=%u Spread=%lu Fail%%=%.1f Steps(Avg.)=%lu (Out-)Spread(Avg.)=%lu Max-Queue-len=%lu\n",
+            printf("N=%lu M=%u Topo=%u Radix=%u Spread=%lu Fail%%=%.2f Steps(Avg.)=%lu (Out-)Spread(Avg.)=%lu Max-Queue-len=%lu\n",
                     spec->node_count,
                     spec->topology.model_type,
                     spec->topology.topology_type,
@@ -155,7 +158,7 @@ int sim_test(sim_spec_t *spec)
 					spec->spread.sum / spec->spread.cnt,
 					spec->queue.max);
         } else {
-            printf("%lu,%u,%u,%u,%lu,%.1f,%.1f,%u",
+            printf("%lu,%u,%u,%u,%lu,%.2f,%.2f,%u",
                     spec->node_count,
                     spec->topology.model_type,
                     spec->topology.topology_type,
@@ -172,6 +175,7 @@ int sim_test(sim_spec_t *spec)
             stats_print(&spec->msgs);
             stats_print(&spec->data);
             stats_print(&spec->queue);
+            stats_print(&spec->dead);
             if (ret_val != OK) {
                 printf(" - ERROR!");
             }
@@ -289,7 +293,7 @@ int sim_coll_model_nodes_missing(sim_spec_t *spec)
         return sim_coll_topology(spec);
     }
 
-    for (index = 0.1; ((index < 0.6) && (ret_val == OK)); index += 0.2) {
+    for (index = 0.01; ((index < 0.1) && (ret_val == OK)); index += 0.02) {
         spec->topology.model.node_fail_rate = index;
         ret_val = sim_coll_topology(spec);
     }
@@ -439,6 +443,10 @@ int sim_coll_parse_args(int argc, char **argv, sim_spec_t *spec)
             spec->topology.model.max_spread = atoi(optarg);
             break;
 
+        case 'f':
+        	spec->topology.model.node_fail_rate = atof(optarg);
+        	break;
+
         case 'i':
             spec->test_count = atoi(optarg);
             break;
@@ -515,7 +523,8 @@ int main(int argc, char **argv)
             /* CSV header */
             printf("np,model,topo,radix,max_offset,max_delay,"
                    "fails,runs,min_steps,max_steps,steps_avg,min_spread,max_spread,spread_avg,"
-                   "min_msgs,max_msgs,msgs_avg,min_data,max_data,data_avg,min_queue,max_queue,queue_avg\n");
+                   "min_msgs,max_msgs,msgs_avg,min_data,max_data,data_avg,min_queue,max_queue,queue_avg,"
+            	   "min_dead,max_dead,dead_avg\n");
         }
     }
 
@@ -531,6 +540,8 @@ int main(int argc, char **argv)
         }
     }
 
+    state_destroy(spec.state);
+
     if (spec.mpi_rank == 0) {
         if (ret_val != OK) {
             printf("Failure stopped the run!\n");
@@ -544,3 +555,23 @@ finalize:
 
     return ret_val;
 }
+
+/* TODO: Fix memleaks: clear && clear && valgrind --leak-check=full ./Debug/sim_allreduce -p 8
+
+==13748== 3,498,240 bytes in 145,760 blocks are definitely lost in loss record 230 of 230
+          ---------------
+==13748==    at 0x4C2DB8F: malloc (in /usr/lib/valgrind/vgpreload_memcheck-amd64-linux.so)
+==13748==    by 0x400F53: comm_graph_create (comm_graph.c:46)
+==13748==    by 0x40100C: comm_graph_clone (comm_graph.c:66)
+==13748==    by 0x40232D: topology_iterator_omit (topo_iterator.c:113)
+==13748==    by 0x404CED: state_process (state_ctx.c:218)
+==13748==    by 0x404F32: state_dequeue (state_ctx.c:242)
+==13748==    by 0x405024: state_next_step (state_ctx.c:270)
+==13748==    by 0x405F10: sim_test_iteration (sim_allreduce.c:72)
+==13748==    by 0x406131: sim_test (sim_allreduce.c:124)
+==13748==    by 0x40650C: sim_coll_tree_recovery (sim_allreduce.c:201)
+==13748==    by 0x4065AA: sim_coll_radix_topology (sim_allreduce.c:231)
+==13748==    by 0x40666A: sim_coll_topology (sim_allreduce.c:259)
+
+
+ */

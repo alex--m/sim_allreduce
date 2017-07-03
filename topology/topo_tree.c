@@ -164,6 +164,11 @@ int tree_start(topology_spec_t *spec, comm_graph_t *graph, tree_context_t *ctx)
     return OK;
 }
 
+void tree_stop(tree_context_t *ctx)
+{
+	free(ctx->contacts);
+}
+
 static void tree_validate(tree_context_t *ctx)
 {
     unsigned idx;
@@ -520,6 +525,8 @@ service_distance:
 
     /* Nothing to do - remain idle */
     result->distance = DISTANCE_NO_PACKET;
+    result->dst      = DESTINATION_IDLE;
+    assert(in_queue->used == 0);
     return OK;
 }
 
@@ -602,7 +609,7 @@ int tree_fix(comm_graph_t *graph, tree_context_t *ctx,
         } else {
             /* the dead node is in my sub-tree - adopt his children */
             idx = graph->nodes[me].directions[COMM_GRAPH_EXTRA_CHILDREN]->node_count;
-            ret = comm_graph_copy(graph, dead, ctx->my_node, COMM_GRAPH_CHILDREN, COMM_GRAPH_EXTRA_CHILDREN);
+            ret = comm_graph_copy(graph, dead, me, COMM_GRAPH_CHILDREN, COMM_GRAPH_EXTRA_CHILDREN);
             if (ret != OK) {
                 return ret;
             }
