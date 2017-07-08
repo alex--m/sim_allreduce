@@ -5,9 +5,7 @@
 #include <stdio.h> // printf only
 
 #define OK (0)
-//#define ERROR (-1)
 #define DONE (1)
-#define DEAD (2)
 #define ERROR (int)(printf("Internal error at %s, line %d.\n",__FILE__, __LINE__) && (-1))
 
 typedef unsigned long node_id;

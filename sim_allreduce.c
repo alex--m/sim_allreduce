@@ -1,5 +1,6 @@
 #include "state/state.h"
 #include <mpi.h>
+#include <math.h>
 
 #define PERROR printf
 
@@ -73,7 +74,7 @@ int sim_test_iteration(sim_spec_t *spec, raw_stats_t *stats)
             spec->topology.step_index++;
 
             /* Sanity check: make sure we're not stuck indefinitely! */
-            if ((spec->node_count * 10 < spec->topology.step_index)) {
+            if ((spec->node_count * 15 < spec->topology.step_index)) {
             	return ERROR;
             }
         }
@@ -144,16 +145,14 @@ int sim_test(sim_spec_t *spec)
 
     if (is_root) {
         if (spec->topology.verbose) {
-            printf("N=%lu M=%u Topo=%u Radix=%u Spread=%lu Fail%%=%.2f Steps(Avg.)=%lu (Out-)Spread(Avg.)=%lu Max-Queue-len=%lu\n",
+            printf("N=%lu M=%u Topo=%u Radix=%u Spread=%lu OfflineFail%%=%.2f OnlineFail%%=%.2f Steps(Avg.)=%lu (Out-)Spread(Avg.)=%lu Max-Queue-len=%lu\n",
                     spec->node_count,
                     spec->topology.model_type,
                     spec->topology.topology_type,
                     spec->topology.topology.tree.radix,
-                    (spec->topology.model_type == COLLECTIVE_MODEL_SPREAD) ?
-                            spec->topology.model.max_spread : 0,
-                    ((spec->topology.model_type == COLLECTIVE_MODEL_NODES_MISSING) ||
-                     (spec->topology.model_type == COLLECTIVE_MODEL_NODES_FAILING)) ?
-                            spec->topology.model.node_fail_rate : 0,
+                    spec->topology.model.max_spread,
+					spec->topology.model.offline_fail_rate,
+					spec->topology.model.online_fail_rate,
                     spec->steps.sum / spec->steps.cnt,
 					spec->spread.sum / spec->spread.cnt,
 					spec->queue.max);
@@ -163,13 +162,10 @@ int sim_test(sim_spec_t *spec)
                     spec->topology.model_type,
                     spec->topology.topology_type,
                     spec->topology.topology.tree.radix,
-                    (spec->topology.model_type == COLLECTIVE_MODEL_SPREAD) ?
-                            spec->topology.model.max_spread : 0,
-                    (spec->topology.model_type == COLLECTIVE_MODEL_NODES_MISSING) ?
-                            spec->topology.model.node_fail_rate : 0,
-                    (spec->topology.model_type == COLLECTIVE_MODEL_NODES_FAILING) ?
-                            spec->topology.model.node_fail_rate : 0,
-                            total_test_count);
+                    spec->topology.model.max_spread,
+					spec->topology.model.offline_fail_rate,
+					spec->topology.model.online_fail_rate,
+                    total_test_count);
             stats_print(&spec->steps);
             stats_print(&spec->spread);
             stats_print(&spec->msgs);
@@ -289,21 +285,50 @@ int sim_coll_model_nodes_missing(sim_spec_t *spec)
     int ret_val = OK;
     float index;
 
-    if (spec->topology.model.node_fail_rate != 0) {
+    if (spec->topology.model.offline_fail_rate != 0) {
         return sim_coll_topology(spec);
     }
 
-    for (index = 0.01; ((index < 0.1) && (ret_val == OK)); index += 0.02) {
-        spec->topology.model.node_fail_rate = index;
+    for (index = 1;
+         ((index <= 100) &&
+    	  (index < (spec->node_count / 10)) &&
+		  (ret_val == OK));
+         index *= 10) {
+        spec->topology.model.offline_fail_rate = index;
+    	printf("offline_fail_rate = %f\n", spec->topology.model.offline_fail_rate);
         ret_val = sim_coll_topology(spec);
     }
 
-    spec->topology.model.node_fail_rate = 0;
+    spec->topology.model.offline_fail_rate = 0;
+    return ret_val;
+}
+
+int sim_coll_model_nodes_failing(sim_spec_t *spec)
+{
+    int ret_val = OK;
+    float index;
+
+    if (spec->topology.model.online_fail_rate != 0) {
+        return sim_coll_model_nodes_missing(spec);
+    }
+
+    for (index = 1;
+         ((index <= 100) &&
+    	  (index < (spec->node_count / 10)) &&
+		  (ret_val == OK));
+         index *= 10) {
+        spec->topology.model.online_fail_rate = index;
+        ret_val = sim_coll_model_nodes_missing(spec);
+    }
+
+    spec->topology.model.online_fail_rate = 0;
     return ret_val;
 }
 
 int sim_coll_model_vars(sim_spec_t *spec)
 {
+	int ret;
+	step_num old_max_spread;
     switch (spec->topology.model_type) {
     case COLLECTIVE_MODEL_BASE:
         return sim_coll_topology(spec);
@@ -315,7 +340,14 @@ int sim_coll_model_vars(sim_spec_t *spec)
         return sim_coll_model_nodes_missing(spec);
 
     case COLLECTIVE_MODEL_NODES_FAILING:
-        return sim_coll_model_nodes_missing(spec);
+        return sim_coll_model_nodes_failing(spec);
+
+    case COLLECTIVE_MODEL_REAL:
+    	old_max_spread = spec->topology.model.max_spread;
+    	spec->topology.model.max_spread = sqrt(spec->node_count);
+        ret = sim_coll_model_nodes_failing(spec);
+        spec->topology.model.max_spread = old_max_spread;
+        return ret;
 
     default:
         PERROR("Unknown Model!\n");
@@ -392,6 +424,7 @@ int sim_coll_parse_args(int argc, char **argv, sim_spec_t *spec)
                 {"radix",          required_argument, 0, 'r' },
                 {"recovery",       required_argument, 0, 'c' },
                 {"fail-rate",      required_argument, 0, 'f' },
+				{"online-fails",   required_argument, 0, 'o' },
                 {"latency",        required_argument, 0, 'l' },
                 {"max-spread",     required_argument, 0, 's' },
                 {"iterations",     required_argument, 0, 'i' },
@@ -444,7 +477,11 @@ int sim_coll_parse_args(int argc, char **argv, sim_spec_t *spec)
             break;
 
         case 'f':
-        	spec->topology.model.node_fail_rate = atof(optarg);
+        	spec->topology.model.offline_fail_rate = atof(optarg);
+        	break;
+
+        case 'o':
+        	spec->topology.model.online_fail_rate = atof(optarg);
         	break;
 
         case 'i':

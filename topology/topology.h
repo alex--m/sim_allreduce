@@ -27,13 +27,15 @@ typedef enum model_type
     COLLECTIVE_MODEL_SPREAD,        /* Random start time offset */
     COLLECTIVE_MODEL_NODES_MISSING, /* Random nodes do not take part */
     COLLECTIVE_MODEL_NODES_FAILING, /* Random nodes fail online */
-    COLLECTIVE_MODEL_ALL /* default, must be last */
+	COLLECTIVE_MODEL_REAL,          /* All other models combined */
+
+    COLLECTIVE_MODEL_ALL            /* default, must be last */
 } model_type_t;
 
 typedef enum tree_service_cycle_method {
-	TREE_SERVICE_CYCLE_RANDOM,
-	TREE_SERVICE_CYCLE_CALC
-} tree_service_cycle_method_t;
+	TREE_SERVICE_CYCLE_CALC = 0,
+	TREE_SERVICE_CYCLE_RANDOM
+} tree_service_cycle_method_t; // TODO: implement selection
 
 typedef enum tree_recovery_method
 {
@@ -68,9 +70,10 @@ typedef struct topology_spec
     } topology;
 
     model_type_t model_type;
-    union {
+    struct {
     	step_num max_spread;
-        float node_fail_rate;
+        float offline_fail_rate; /* if >1 - absolute, if <1 - percentage of nodes */
+        float online_fail_rate; /* if >1 - absolute, if <1 - rate out of total nodes */
     } model;
 } topology_spec_t;
 
@@ -103,9 +106,13 @@ typedef struct send_list {
 typedef struct topology_iterator {
     comm_graph_t *graph;        /* Pointer to the graph - changes upon node failures */
     send_list_t  in_queue;      /* Stores incoming messages to this node */
-    step_num     time_offset;   /* When did this node "join" the collective */
-#define          TIME_OFFSET_DEAD ((unsigned)-1)
-    step_num     time_finished; /* When did this node "leave" the collective */
+
+    step_num     start_offset;   /* When does this node start the collective algorithm */
+    step_num     death_offset;   /* When does this node stop the collective algorithm */
+#define          NODE_IS_DEAD     ((unsigned)-1)
+#define          NODE_IS_IMORTAL  ((unsigned)-2)
+
+    step_num     finish;        /* When did this node "leave" the collective */
     char         ctx[0];        /* internal context, type depends on topology */
 } topology_iterator_t;
 
@@ -128,8 +135,8 @@ typedef struct topo_funcs
     void   (*stop_f)(void *internal_ctx);
 } topo_funcs_t;
 
-#define IS_DEAD(iterator) (iterator->time_offset == TIME_OFFSET_DEAD)
-#define SET_DEAD(iterator) ({ iterator->time_offset = TIME_OFFSET_DEAD; })
+#define IS_DEAD(iterator) (iterator->death_offset == NODE_IS_DEAD)
+#define SET_DEAD(iterator) ({ iterator->death_offset = NODE_IS_DEAD; })
 
 size_t topology_iterator_size();
 

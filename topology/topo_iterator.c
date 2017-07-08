@@ -1,3 +1,4 @@
+#include <math.h>
 #include <assert.h>
 #include "topology.h"
 
@@ -22,6 +23,40 @@ size_t topology_iterator_size()
     return max + sizeof(topology_iterator_t);
 }
 
+static inline double gaussian_random(double mean, double std_dev, topology_spec_t *spec)
+{
+	int hasSpare = 1;
+	double spare;
+
+	if (hasSpare) {
+		hasSpare = 1;
+		return mean + std_dev * spare;
+	}
+
+	hasSpare = 1;
+	double u, v, s;
+	do {
+		u = FLOAT_RANDOM(spec) * 2.0 - 1.0;
+		v = FLOAT_RANDOM(spec) * 2.0 - 1.0;
+		s = u * u + v * v;
+	} while ((s >= 1.0) || (s == 0.0));
+
+	s = sqrt(-2.0 * log(s) / s);
+	spare = v * s;
+	return mean + std_dev * u * s;
+}
+
+
+static step_num topology_choose_offset(topology_spec_t *spec)
+{
+    if ((spec->model_type == COLLECTIVE_MODEL_SPREAD) ||
+    	(spec->model_type == COLLECTIVE_MODEL_REAL)) {
+    	return gaussian_random(0, spec->model.max_spread, spec);
+    }
+
+    return 0;
+}
+
 int topology_iterator_create(topology_spec_t *spec,
                              topo_funcs_t *funcs,
                              topology_iterator_t *iterator)
@@ -40,13 +75,7 @@ int topology_iterator_create(topology_spec_t *spec,
             comm_graph_print(current_topology);
         }
     }
-
     iterator->graph = current_topology;
-    iterator->time_finished = 0;
-    iterator->time_offset =
-            (spec->model_type == COLLECTIVE_MODEL_SPREAD) ?
-            CYCLIC_RANDOM(spec, spec->model.max_spread) : 0;
-    memset(&iterator->in_queue, 0, sizeof(iterator->in_queue));
 
     ret_val = comm_graph_append(current_topology, spec->my_rank,
                                 spec->my_rank, COMM_GRAPH_EXCLUDE);
@@ -54,13 +83,21 @@ int topology_iterator_create(topology_spec_t *spec,
         return ret_val;
     }
 
+    /* Initialize the topology-dependent part of the context */
     ret_val = funcs->start_f(spec, current_topology, iterator->ctx);
 
-    if ((spec->model_type == COLLECTIVE_MODEL_NODES_MISSING) &&
-        (spec->model.node_fail_rate > FLOAT_RANDOM(spec)) &&
+    /* Set the rest of the context */
+    iterator->finish = 0;
+    iterator->start_offset = topology_choose_offset(spec);
+    memset(&iterator->in_queue, 0, sizeof(iterator->in_queue));
+    if (((spec->model_type == COLLECTIVE_MODEL_NODES_MISSING) ||
+    	 (spec->model_type == COLLECTIVE_MODEL_REAL)) &&
+        (spec->model.offline_fail_rate < 1.0) &&
+    	(spec->model.offline_fail_rate > FLOAT_RANDOM(spec)) &&
 		(spec->my_rank != 0)) {
         SET_DEAD(iterator);
-        return DEAD;
+    } else {
+    	iterator->death_offset = NODE_IS_IMORTAL;
     }
 
     return ret_val;
@@ -69,39 +106,28 @@ int topology_iterator_create(topology_spec_t *spec,
 int topology_iterator_next(topology_spec_t *spec, topo_funcs_t *funcs,
                            topology_iterator_t *iterator, send_item_t *result)
 {
+	step_num now = spec->step_index;
 	comm_graph_t *graph = iterator->graph;
     result->distance = DISTANCE_SEND_NOW + spec->latency;
-    switch (spec->model_type)
-    {
-    case COLLECTIVE_MODEL_SPREAD:
-        if (iterator->time_offset) {
-            iterator->time_offset--;
-            result->dst = DESTINATION_SPREAD;
-            graph       = NULL; /* Triggers Keep-alive-only functionality */
-        }
-        break;
 
-    case COLLECTIVE_MODEL_NODES_FAILING:
-        if ((spec->model.node_fail_rate > FLOAT_RANDOM(spec)) &&
-        	(result->src != 0)) {
-            result->distance = DISTANCE_NO_PACKET;
-            result->dst      = DESTINATION_DEAD;
-            SET_DEAD(iterator);
-            return DEAD; /* Triggers topology fix */
-        }
-        /* Intentionally no break */
-
-    case COLLECTIVE_MODEL_NODES_MISSING:
-        if (IS_DEAD(iterator)) {
-            result->distance = DISTANCE_NO_PACKET;
-            result->dst      = DESTINATION_DEAD;
-            return OK;
-        }
-        break;
-
-    default:
-        break;
+    /* Check if time to die */
+    if (now == iterator->death_offset) {
+    	SET_DEAD(iterator);
     }
+
+    /* Check if already dead */
+    if (IS_DEAD(iterator)) {
+    	result->distance = DISTANCE_NO_PACKET;
+    	result->dst      = DESTINATION_DEAD;
+    	return OK;
+    }
+
+	/* Check the input spread */
+	if (iterator->start_offset) {
+		iterator->start_offset--;
+		result->dst = DESTINATION_SPREAD;
+		graph       = NULL; /* Triggers Keep-alive-only functionality */
+	}
 
     return funcs->next_f(graph, &iterator->in_queue, iterator->ctx, result);
 }
@@ -109,6 +135,12 @@ int topology_iterator_next(topology_spec_t *spec, topo_funcs_t *funcs,
 int topology_iterator_omit(topology_iterator_t *iterator, topo_funcs_t *funcs,
                            tree_recovery_method_t method, node_id broken)
 {
+	/* Special case: kill the current node */
+	if (broken == 0) {
+    	SET_DEAD(iterator);
+    	return OK;
+	}
+
     if (iterator->graph == current_topology) {
         iterator->graph = comm_graph_clone(current_topology);
     }

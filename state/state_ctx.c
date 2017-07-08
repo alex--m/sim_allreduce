@@ -1,3 +1,4 @@
+#include <math.h>
 #include <stdio.h>
 #include <assert.h>
 #include "state.h"
@@ -26,6 +27,7 @@ extern topo_funcs_t topo_map[];
 int state_create(topology_spec_t *spec, state_t *old_state, state_t **new_state)
 {
     state_t *ctx;
+    node_id dead_node;
     int index, ret_val;
 
     if (old_state) {
@@ -90,6 +92,7 @@ int state_create(topology_spec_t *spec, state_t *old_state, state_t **new_state)
         return ERROR;
     }
 
+    /* Initialize individual (per-node) contexts */
     for (index = 0; index < spec->node_count; index++) {
         topology_iterator_t *it = GET_ITERATOR(ctx, index);
 
@@ -101,15 +104,37 @@ int state_create(topology_spec_t *spec, state_t *old_state, state_t **new_state)
         /* initialize the iterators over the topology requested */
         ret_val = topology_iterator_create(spec, ctx->funcs, it);
         if (ret_val != OK) {
-            if (ret_val == DEAD) {
-                UNSET_LIVE(ctx, index);
-            } else {
-                state_destroy(ctx);
-                return ret_val;
-            }
-        } else {
-            SET_LIVE(ctx, index);
+        	state_destroy(ctx);
+        	return ret_val;
         }
+    }
+
+    /* Choose dead (offline-fail) nodes, if applicable */
+    if (((spec->model_type == COLLECTIVE_MODEL_NODES_MISSING) ||
+    	 (spec->model_type == COLLECTIVE_MODEL_REAL)) &&
+    	(spec->model.offline_fail_rate >= 1.0)){
+		for (index = 0; index < spec->model.offline_fail_rate; index++) {
+			do {
+				dead_node = CYCLIC_RANDOM(spec, spec->node_count);
+			} while (dead_node != 0);
+			SET_DEAD(GET_ITERATOR(ctx, dead_node));
+			printf("OFFLINE DEAD: %lu\n", dead_node);
+		}
+    }
+
+    /* Choose faulty (online-fail) nodes, if applicable */
+    if (((spec->model_type == COLLECTIVE_MODEL_NODES_FAILING) ||
+    	 (spec->model_type == COLLECTIVE_MODEL_REAL)) &&
+    	(spec->model.online_fail_rate >= 1.0)){
+		for (index = 0; index < spec->model.online_fail_rate; index++) {
+			do {
+				dead_node = CYCLIC_RANDOM(spec, spec->node_count);
+			} while (dead_node != 0);
+			GET_ITERATOR(ctx, dead_node)->death_offset =
+					CYCLIC_RANDOM(spec, spec->latency * (int)log10(spec->node_count));
+			printf("ONLINE DEAD: %lu (at step #%lu)\n", dead_node, GET_ITERATOR(ctx, dead_node)->death_offset);
+			// TODO: find a better upper-limit!
+		}
     }
 
     *new_state = ctx;
@@ -126,12 +151,10 @@ static inline int state_enqueue(state_t *state, send_item_t *sent, send_list_t *
     }
 
     if (list == NULL) {
-        list = &state->outq;
-        if (IS_LIVE_HERE(sent->bitfield)) {
-            state->stats.data_len_counter += POPCOUNT_HERE(sent->bitfield,
-                    state->spec->node_count);
-            state->stats.messages_counter++;
-        }
+    	list = &state->outq;
+    	state->stats.data_len_counter += POPCOUNT_HERE(sent->bitfield,
+    			state->spec->node_count);
+    	state->stats.messages_counter++;
     }
 
     /* make sure chuck has free slots */
@@ -195,24 +218,13 @@ static inline int state_process(state_t *state, send_item_t *incoming)
 
     if (IS_DEAD(destination)) {
         /* Packet destination is dead */
-        if (!IS_DEAD(GET_ITERATOR(state, incoming->src))) {
-            /* live A sends to dead B - A needs to be "timed-out" (notified) */
-            send_item_t death = {
-                    .dst = incoming->src,
-                    .src = incoming->dst,
-        			.distance = incoming->timeout,
-                    .bitfield = GET_NEW_BITFIELD(state, incoming->dst)
-					// Never actually merged - see below...
-            };
+    	if (incoming->timeout) {
+    		/* Wait until the timeout to pronounce death */
+    		send_item_t death;
+    		memcpy(&death, incoming, sizeof(send_item_t));
+    		death.distance = death.timeout - state->spec->step_index;
+    		death.timeout = 0;
             ret_val = state_enqueue(state, &death, NULL);
-        }
-    } else {
-        /* Packet destination is alive */
-        if (IS_LIVE_HERE(incoming->bitfield)) {
-            /* live A sends to live B */
-			incoming->distance = DISTANCE_SEND_NOW;
-			ret_val = state_enqueue(state, incoming, &destination->in_queue);
-			incoming->distance = DISTANCE_VACANT;
         } else {
             /* dead A sends to live B - simulates timeout on B */
             ret_val = topology_iterator_omit(destination, state->funcs,
@@ -222,6 +234,11 @@ static inline int state_process(state_t *state, send_item_t *incoming)
             	SET_FULL(state, incoming->dst);
             }
         }
+    } else {
+    	/* Packet destination is alive */
+    	incoming->distance = DISTANCE_SEND_NOW;
+    	ret_val = state_enqueue(state, incoming, &destination->in_queue);
+    	incoming->distance = DISTANCE_VACANT;
     }
 
     return ret_val;
@@ -280,7 +297,7 @@ int state_next_step(state_t *state)
             res.dst = DESTINATION_DEAD;
             dead_count++;
             ret_val = OK; // For verbose mode
-        } else if ((iterator->time_finished) && (idx != 0)) {
+        } else if ((iterator->finish) && (idx != 0)) {
         	/* Already complete (for this node) */
         	ret_val = DONE;
             active_count--;
@@ -290,14 +307,12 @@ int state_next_step(state_t *state)
             ret_val = topology_iterator_next(spec, funcs, iterator, &res);
             if (ret_val != OK) {
                 if (ret_val == DONE) {
-                    if (iterator->time_finished == 0) {
-                    	iterator->time_finished = state->spec->step_index;
+                    if (iterator->finish == 0) {
+                    	iterator->finish = state->spec->step_index;
                     } else {
                     	assert(idx == 0);
                     }
                     active_count--;
-                } else if (ret_val == DEAD) {
-                    UNSET_LIVE(state, idx);
                 } else {
                     return ret_val;
                 }
@@ -323,10 +338,10 @@ int state_next_step(state_t *state)
             if (idx == 0) {
                 printf("\n");
             }
-            if (IS_LIVE(state, idx)) {
-            	printf("\nproc=%lu\tpopcount=%u\t", idx, POPCOUNT(state, idx));
-            } else {
+            if (IS_DEAD(iterator)) {
             	printf("\nproc=%lu\tpopcount=DEAD\t", idx);
+            } else {
+            	printf("\nproc=%lu\tpopcount=%u\t", idx, POPCOUNT(state, idx));
             }
             PRINT(state, idx);
             if (ret_val == DONE) {
@@ -343,6 +358,8 @@ int state_next_step(state_t *state)
             	printf(" - pending (spread)");
             } else if (res.dst == DESTINATION_DEAD) {
                 printf(" - DEAD");
+            } else if (res.dst == DESTINATION_IDLE) {
+                printf(" - IDLE!");
             } else {
                 printf(" - waits for #%lu", res.dst);
             }
@@ -353,7 +370,7 @@ int state_next_step(state_t *state)
     	topology_iterator_t *iterator   = GET_ITERATOR(state, 0);
         state->stats.max_queueu_len     = iterator->in_queue.max;
         state->stats.last_step_counter  = state->spec->step_index;
-        state->stats.first_step_counter = iterator->time_finished;
+        state->stats.first_step_counter = iterator->finish;
         state->stats.death_toll         = dead_count;
 
         /* Find longest queue ever */
@@ -368,8 +385,8 @@ int state_next_step(state_t *state)
         // Note: Does NOT include #0 for spread calculation!
         for (idx = 1; idx < state->spec->node_count; idx++) {
         	iterator = GET_ITERATOR(state, idx);
-        	if (state->stats.first_step_counter > iterator->time_finished) {
-        		state->stats.first_step_counter = iterator->time_finished;
+        	if (state->stats.first_step_counter > iterator->finish) {
+        		state->stats.first_step_counter = iterator->finish;
         	}
         }
 
