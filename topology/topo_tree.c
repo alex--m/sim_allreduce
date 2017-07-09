@@ -220,7 +220,7 @@ static void tree_validate(tree_context_t *ctx)
 {
 	unsigned idx;
 	for (idx = 0; idx < ctx->contacts_used; idx++) {
-		if (ctx->contacts[idx].distance != DISTANCE_VACANT) {
+		if ((ctx->contacts[idx].distance != DISTANCE_VACANT) && (ctx->contacts[idx].last_seen)) {
 			assert((ctx->contacts[idx].timeout == TIMEOUT_NEVER) ||
 					(ctx->contacts[idx].timeout > ctx->contacts[idx].last_seen));
 			assert((ctx->contacts[idx].his_timeout == TIMEOUT_NEVER) ||

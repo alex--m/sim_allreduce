@@ -116,7 +116,7 @@ int state_create(topology_spec_t *spec, state_t *old_state, state_t **new_state)
 		for (index = 0; index < spec->model.offline_fail_rate; index++) {
 			do {
 				dead_node = CYCLIC_RANDOM(spec, spec->node_count);
-			} while (dead_node != 0);
+			} while (dead_node == 0);
 			SET_DEAD(GET_ITERATOR(ctx, dead_node));
 			printf("OFFLINE DEAD: %lu\n", dead_node);
 		}
@@ -129,7 +129,7 @@ int state_create(topology_spec_t *spec, state_t *old_state, state_t **new_state)
 		for (index = 0; index < spec->model.online_fail_rate; index++) {
 			do {
 				dead_node = CYCLIC_RANDOM(spec, spec->node_count);
-			} while (dead_node != 0);
+			} while (dead_node == 0);
 			GET_ITERATOR(ctx, dead_node)->death_offset =
 					CYCLIC_RANDOM(spec, spec->latency * (int)log10(spec->node_count));
 			printf("ONLINE DEAD: %lu (at step #%lu)\n", dead_node, GET_ITERATOR(ctx, dead_node)->death_offset);
@@ -223,15 +223,15 @@ static inline int state_process(state_t *state, send_item_t *incoming)
     		send_item_t death;
     		memcpy(&death, incoming, sizeof(send_item_t));
     		death.distance = death.timeout - state->spec->step_index;
+    		printf("\nWAIT FOR DEATH: %lu !\n", death.distance);
     		death.timeout = 0;
             ret_val = state_enqueue(state, &death, NULL);
         } else {
-            /* dead A sends to live B - simulates timeout on B */
-            ret_val = topology_iterator_omit(destination, state->funcs,
-                    state->spec->topology.tree.recovery, incoming->src);
-            SET_NEW_BIT(state, incoming->dst, incoming->src);
-            if (POPCOUNT(state, incoming->dst) == state->spec->node_count) {
-            	SET_FULL(state, incoming->dst);
+            ret_val = topology_iterator_omit(GET_ITERATOR(state, incoming->dst),
+            		state->funcs, state->spec->topology.tree.recovery, incoming->src);
+            SET_NEW_BIT(state, incoming->src, incoming->dst);
+            if (POPCOUNT(state, incoming->src) == state->spec->node_count) {
+            	SET_FULL(state, incoming->src);
             }
         }
     } else {
