@@ -161,7 +161,7 @@ static inline int state_enqueue(state_t *state, send_item_t *sent, send_list_t *
     if (list->allocated == list->used) {
         /* extend chuck */
         if (list->allocated == 0) {
-            list->allocated = 10;
+            list->allocated = 2 * state->spec->node_count;
         } else {
             list->allocated *= 2;
         }
@@ -194,11 +194,20 @@ static inline int state_enqueue(state_t *state, send_item_t *sent, send_list_t *
         /* Go to the first newly added slot */
         slot_idx = list->used;
     } else {
+    	slot_idx = list->next;
+
         /* find next slot available */
-        while (list->items[slot_idx].distance != DISTANCE_VACANT) {
+        while ((list->items[slot_idx].distance != DISTANCE_VACANT) &&
+        	   (slot_idx < list->allocated)) {
             slot_idx++;
         }
-        assert(slot_idx < list->allocated);
+
+        if (slot_idx == list->allocated) {
+        	slot_idx = 0;
+        	while (list->items[slot_idx].distance != DISTANCE_VACANT) {
+				slot_idx++;
+			}
+        }
     }
 
     /* fill the slot with the packet to be sent later */
@@ -208,6 +217,7 @@ static inline int state_enqueue(state_t *state, send_item_t *sent, send_list_t *
     if (list->max < ++list->used) {
     	list->max = list->used;
     }
+    list->next = ++slot_idx;
     return OK;
 }
 
