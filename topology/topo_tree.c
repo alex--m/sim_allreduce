@@ -137,6 +137,9 @@ static inline unsigned tree_count_peers(comm_graph_t *graph, node_id origin, tre
 #define TREE_SERVICE_CYCLE_LENGTH(graph, node) (2 * tree_count_peers(graph, node, 1) * TREE_NEPOTISM_FACTOR)
 static inline step_num tree_calc_timeout(comm_graph_t *graph, tree_context_t *ctx, node_id dest, tree_distance_t distance)
 {
+	/* The math expression here is:
+	 * 2L + 2*Nep*peers(1)*ceil(peers(distance)*(Nep**distance)/2*Nep*peers(1))
+	 */
     assert(distance != ANY_DISTANCE);
     assert(distance >= MIN_DISTANCE);
 
@@ -148,10 +151,8 @@ static inline step_num tree_calc_timeout(comm_graph_t *graph, tree_context_t *ct
     	return 0;
     }
 
-    double how_many_service_cycles = distant_peers * pow(TREE_NEPOTISM_FACTOR, distance) / service_window_size;
-    unsigned complete_service_cycles = (unsigned) how_many_service_cycles;
-    step_num total_service = service_window_size * (complete_service_cycles +
-    		((double)complete_service_cycles != how_many_service_cycles));
+    double how_many_service_cycles = ceil((distant_peers * pow(TREE_NEPOTISM_FACTOR, distance)) / service_window_size);
+    step_num total_service = service_window_size * how_many_service_cycles;
     return total_service + (2 * latency);
 }
 

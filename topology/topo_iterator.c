@@ -23,35 +23,47 @@ size_t topology_iterator_size()
     return max + sizeof(topology_iterator_t);
 }
 
-static inline double gaussian_random(double mean, double std_dev, topology_spec_t *spec)
+double NormalCDFInverse(double p);
+double RationalApproximation(double t);
+double RationalApproximation(double t)
 {
-	int hasSpare = 1;
-	double spare;
-
-	if (hasSpare) {
-		hasSpare = 1;
-		return mean + std_dev * spare;
-	}
-
-	hasSpare = 1;
-	double u, v, s;
-	do {
-		u = FLOAT_RANDOM(spec) * 2.0 - 1.0;
-		v = FLOAT_RANDOM(spec) * 2.0 - 1.0;
-		s = u * u + v * v;
-	} while ((s >= 1.0) || (s == 0.0));
-
-	s = sqrt(-2.0 * log(s) / s);
-	spare = v * s;
-	return mean + std_dev * u * s;
+	double c[] = {2.515517, 0.802853, 0.010328};
+	double d[] = {1.432788, 0.189269, 0.001308};
+	return (t - ((c[2]*t + c[1])*t + c[0]) /
+                   (((d[2]*t + d[1])*t + d[0])*t + 1.0));
+}
+double NormalCDFInverse(double p)
+{
+	assert(p > 0.0 && p < 1.0);
+	return (p < 0.5)?
+		-RationalApproximation(sqrt(-2.0 * log(p))):
+		RationalApproximation(sqrt(-2.0 * log(1 - p)));
 }
 
+double icdf(double p, double av, double sd)
+{
+	return(NormalCDFInverse(p) * sd + av);
+}
+
+long gaussian_random(long spread, topology_spec_t *spec)
+{
+	static long base = -1;
+	static long savedspread;
+
+	if(base == -1 || spread != savedspread)
+	{
+		base = -icdf(1.0 / (RAND_MAX + 2.0), 0.0, spread);
+		savedspread = spread;
+	}
+	// TODO: use FLOAT_RANDOM(spec)!
+	return(base + icdf((rand() + 1.0) / (RAND_MAX + 2.0), 0.0, (double)spread));
+}
 
 static step_num topology_choose_offset(topology_spec_t *spec)
 {
     if ((spec->model_type == COLLECTIVE_MODEL_SPREAD) ||
     	(spec->model_type == COLLECTIVE_MODEL_REAL)) {
-    	return gaussian_random(0, spec->model.max_spread, spec);
+    	return gaussian_random(spec->model.max_spread, spec);
     }
 
     return 0;
