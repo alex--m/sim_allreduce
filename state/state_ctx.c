@@ -233,12 +233,11 @@ static inline int state_process(state_t *state, send_item_t *incoming)
     		send_item_t death;
     		memcpy(&death, incoming, sizeof(send_item_t));
     		death.distance = death.timeout - state->spec->step_index;
-    		printf("\nWAIT FOR DEATH: %lu !\n", death.distance);
     		death.timeout = 0;
             ret_val = state_enqueue(state, &death, NULL);
         } else {
-            ret_val = topology_iterator_omit(GET_ITERATOR(state, incoming->dst),
-            		state->funcs, state->spec->topology.tree.recovery, incoming->src);
+            ret_val = topology_iterator_omit(GET_ITERATOR(state, incoming->src),
+            		state->funcs, state->spec->topology.tree.recovery, incoming->dst);
             SET_NEW_BIT(state, incoming->src, incoming->dst);
             if (POPCOUNT(state, incoming->src) == state->spec->node_count) {
             	SET_FULL(state, incoming->src);
@@ -363,7 +362,7 @@ int state_next_step(state_t *state)
             		printf(" - sends to #%lu (msg=%lu)", res.dst, res.msg);
             	}
             } else if (res.dst == DESTINATION_UNKNOWN) {
-            	printf(" - waits for somebody (bitfield incomplete)");
+            	printf(" - waits for somebody - max timeout is %lu (now is %lu)", res.src, spec->step_index);
             } else if (res.dst == DESTINATION_SPREAD) {
             	printf(" - pending (spread)");
             } else if (res.dst == DESTINATION_DEAD) {

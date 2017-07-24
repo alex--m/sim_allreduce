@@ -38,6 +38,6 @@ void stats_aggregate(struct stats *stats, int is_root)
 
 void stats_print(struct stats *stats)
 {
-    stats->avg = stats->sum / stats->cnt;
+    stats->avg = stats->cnt ? stats->sum / stats->cnt : 0;
     printf(",%lu,%lu,%.2f", stats->min, stats->max, stats->avg);
 }
