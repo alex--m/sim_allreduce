@@ -278,6 +278,25 @@ static inline int state_dequeue(state_t *state)
     return ret_val;
 }
 
+static inline int topology_iterator_omit_recursive(state_t *state, node_id destination, node_id source)
+{
+	int ret;
+	node_id source_father;
+    topology_iterator_t *iterator;
+	if (source == destination) {
+		return OK;
+	}
+
+	iterator = GET_ITERATOR(state, destination);
+	// TODO: make sure source is always in destination's subtree!
+	source_father = iterator->graph->nodes[source].directions[COMM_GRAPH_FATHERS]->nodes[0];
+	if ((ret = topology_iterator_omit_recursive(state, destination, source_father)) != OK) {
+		return ret;
+	}
+
+	return topology_iterator_omit(iterator, state->funcs, state->spec->topology.tree.recovery, source);
+}
+
 /* generate a list of packets to be sent out to other peers (for MPI_Alltoallv) */
 int state_next_step(state_t *state)
 {
@@ -289,14 +308,14 @@ int state_next_step(state_t *state)
     topo_funcs_t *funcs   = state->funcs;
     node_id active_count  = spec->node_count - 1; // #0 is up forever
 
-    /* Switch step matrix before starting next iteration */
-    memcpy(state->old_matrix, state->new_matrix, CTX_MATRIX_SIZE(state));
-
     /* Deliver queued packets */
     ret_val = state_dequeue(state);
     if (ret_val != OK) {
     	return ERROR; /* Don't forward the error in case it's "DONE" */
     }
+
+    /* Switch step matrix before starting next iteration */
+    memcpy(state->old_matrix, state->new_matrix, CTX_MATRIX_SIZE(state));
 
     /* Iterate over all process-iterators */
     for (idx = 0; idx < state->spec->node_count; idx++) {
@@ -329,6 +348,12 @@ int state_next_step(state_t *state)
             	if (res.dst == idx) {
             		if (res.bitfield != BITFIELD_IGNORE_DATA) {
             			MERGE(state, idx, res.bitfield);
+            		}
+            		if (res.src != SOURCE_EXPECTED) {
+            			ret_val = topology_iterator_omit_recursive(state, idx, res.src);
+						if (ret_val != OK) {
+							return ret_val;
+						}
             		}
             	} else {
             		/* Send this outgoing packet */

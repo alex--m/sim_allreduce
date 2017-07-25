@@ -84,6 +84,7 @@ typedef struct send_item {
 #define           DESTINATION_DEAD    ((node_id)-3)
 #define           DESTINATION_IDLE    ((node_id)-4)
     node_id       src;       /* packet source (sender) */
+#define           SOURCE_EXPECTED     ((node_id)-1)
     msg_type      msg;       /* packet type (per-protocol) */
     step_num      distance;  /* packet distance (time to be delayed in queue) */
 #define           DISTANCE_VACANT    (0)
