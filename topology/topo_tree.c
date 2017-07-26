@@ -26,6 +26,7 @@ typedef struct tree_contact {
 #define TIMEOUT_NEVER ((step_num)-1)
     step_num his_timeout;     /* How long until he considers me dead (resets to NEVER) */
     step_num pkt_timeout;     /* Timeout on packets sent to it */
+    step_num between_kas;     /* interval between consecutive keepalive messages */
 } tree_contact_t;
 
 typedef struct tree_context {
@@ -56,13 +57,16 @@ enum tree_msg_type {
 #define TREE_MSG_DATA(distance)   (TREE_MSG_DATA          + TREE_MSG_MAX * distance)
     TREE_MSG_KEEPALIVE     = 2,
 #define TREE_MSG_KA(distance)     (TREE_MSG_KEEPALIVE     + TREE_MSG_MAX * distance)
-    TREE_MSG_MAX           = 3,
+    TREE_MSG_KEEPALIVE_ACK = 3,
+#define TREE_MSG_ACK(distance)    (TREE_MSG_KEEPALIVE_ACK + TREE_MSG_MAX * distance)
+    TREE_MSG_MAX           = 4,
 };
 
 enum tree_action {
 	TREE_SEND,
     TREE_RECV,
-    TREE_WAIT
+    TREE_WAIT,
+	TREE_WAIT_ROOT
 };
 
 struct order {
@@ -79,6 +83,9 @@ struct order tree_order[] = {
 		/* Then - send to fathers (up the tree) */
         {COMM_GRAPH_FATHERS,        TREE_SEND},/* Death -> zero send_idx */
         {COMM_GRAPH_EXTRA_FATHERS,  TREE_SEND},/* Death -> zero send_idx */
+
+		/* rank #0 only - wait for everybody */
+		{COMM_GRAPH_EXCLUDE,        TREE_WAIT_ROOT},/* Death -> goto COMM_GRAPH_EXTRA_FATHERS, zero send_idx */
 
 		/* Next - wait for results (for verbose mode) */
         {COMM_GRAPH_FATHERS,        TREE_RECV},/* Death -> goto COMM_GRAPH_EXTRA_FATHERS, zero send_idx */
@@ -160,7 +167,7 @@ int tree_start(topology_spec_t *spec, comm_graph_t *graph, tree_context_t *ctx)
 {
     comm_graph_node_t *my_node = &graph->nodes[spec->my_rank];
     comm_graph_direction_ptr_t dir_ptr;
-    step_num timeout;
+    step_num timeout, my_timeout;
     unsigned idx, tmp;
 
     memset(ctx, 0, sizeof(*ctx));
@@ -183,6 +190,7 @@ int tree_start(topology_spec_t *spec, comm_graph_t *graph, tree_context_t *ctx)
     }
 
     /* Add fathers to the contact list */
+    my_timeout = tree_calc_timeout(graph, ctx, ctx->my_node, 1);
     dir_ptr = my_node->directions[COMM_GRAPH_FATHERS];
     for (idx = 0; idx < dir_ptr->node_count; idx++) {
     	node_id node                    = dir_ptr->nodes[idx];
@@ -194,6 +202,7 @@ int tree_start(topology_spec_t *spec, comm_graph_t *graph, tree_context_t *ctx)
         ctx->contacts[idx].timeout      = TIMEOUT_NEVER;
         ctx->contacts[idx].his_timeout  = TIMEOUT_NEVER;
         ctx->contacts[idx].pkt_timeout  = timeout;
+        ctx->contacts[idx].between_kas  = (timeout > my_timeout) ? timeout : my_timeout;
     }
 
     /* Add children to contact list */
@@ -209,6 +218,7 @@ int tree_start(topology_spec_t *spec, comm_graph_t *graph, tree_context_t *ctx)
         ctx->contacts[idx].timeout      = TIMEOUT_NEVER;
         ctx->contacts[idx].his_timeout  = TIMEOUT_NEVER;
         ctx->contacts[idx].pkt_timeout  = timeout;
+        ctx->contacts[idx].between_kas  = (timeout > my_timeout) ? timeout : my_timeout;
     }
 
     return OK;
@@ -307,6 +317,10 @@ static inline int tree_contact_lookup(tree_context_t *ctx, node_id id,
     (*contact)->his_timeout  = TIMEOUT_NEVER;
     (*contact)->timeout      = TIMEOUT_NEVER;
     (*contact)->pkt_timeout  = tree_calc_timeout(ctx->graph, ctx, id, distance);
+    (*contact)->between_kas  = tree_calc_timeout(ctx->graph, ctx, ctx->my_node, distance);
+    if ((*contact)->between_kas < (*contact)->pkt_timeout) {
+    	(*contact)->between_kas = (*contact)->pkt_timeout;
+    }
     (*contact)->distance     = distance;
     (*contact)->node         = id;
     (*contact)->timeout_sent = 0;
@@ -336,9 +350,6 @@ static inline int tree_next_by_topology(tree_context_t *ctx,
                 while (wait_index < dir_ptr->node_count) {
                     next_peer = dir_ptr->nodes[wait_index];
 					ret = tree_contact_lookup(ctx, next_peer, DISTANCE_VACANT, &contact);
-					if (ret == DONE) {
-						printf("DONE?");
-					}
                     if ((IS_BIT_SET_HERE(next_peer, ctx->my_bitfield)) || (ret == DONE)) {
                         wait_index++;
                         ctx->next_wait_index++;
@@ -383,7 +394,7 @@ static inline int tree_next_by_topology(tree_context_t *ctx,
             	ctx->next_wait_index  = wait_index;
             	ctx->order_indicator  = order_idx;
 
-                /* Send a keep-alive message */
+                /* Send a message */
                 current_step_index    = *ctx->step_index;
                 timeout               = current_step_index + contact->pkt_timeout;
                 if (contact->timeout == TIMEOUT_NEVER) {
@@ -401,6 +412,10 @@ static inline int tree_next_by_topology(tree_context_t *ctx,
             }
             break;
 
+        case TREE_WAIT_ROOT:
+        	if (ctx->my_node != 0) {
+        		break;
+        	}
         case TREE_WAIT:
             /* Wait for bitmap to be full before distributing */
             if (!IS_FULL_HERE(ctx->my_bitfield)) {
@@ -441,12 +456,13 @@ static inline int tree_handle_incoming_packet(tree_context_t *ctx,
 
     contact->timeout   = TIMEOUT_NEVER;
     contact->last_seen = *ctx->step_index;
-    if ((contact->his_timeout == TIMEOUT_NEVER) ||
-    	(contact->his_timeout < incoming->timeout)) {
+    if ((type != TREE_MSG_KEEPALIVE_ACK) &&
+    	((contact->his_timeout == TIMEOUT_NEVER) ||
+    	 (contact->his_timeout < incoming->timeout))) {
     	contact->his_timeout = incoming->timeout;
     } /* Otherwise old KA packets would decrease the timeout, which is not true for the peer */
 
-    return (type == TREE_MSG_KEEPALIVE) ? DONE : OK;
+    return (type == TREE_MSG_DATA) ? OK : DONE;
 }
 
 static inline int queue_get_msg_by_distance(tree_context_t *ctx,
@@ -492,7 +508,7 @@ static inline int queue_get_msg_by_distance(tree_context_t *ctx,
 static inline int tree_pending_keepalives(tree_context_t *ctx, step_num *eta,
                                           tree_distance_t distance, send_item_t *result)
 {
-	int considered_dead, fits_service_cycle, needs_ka, needs_ack;
+	int considered_dead, fits_service_cycle, needs_ka = 0, needs_ack = 0;
 	step_num current_step_index = *ctx->step_index;
 	tree_contact_t *contact;
 	unsigned idx;
@@ -505,6 +521,7 @@ static inline int tree_pending_keepalives(tree_context_t *ctx, step_num *eta,
 			if (fits_service_cycle) {
 				needs_ack = (contact->his_timeout != TIMEOUT_NEVER);
 				if (needs_ack) {
+					result->msg = TREE_MSG_ACK(contact->distance);
 					goto send_keepalive;
 				}
 			}
@@ -523,29 +540,29 @@ static inline int tree_pending_keepalives(tree_context_t *ctx, step_num *eta,
 				fits_service_cycle = ((distance == ANY_DISTANCE) || (contact->distance == distance));
 				if (fits_service_cycle) {
 					needs_ka = (contact->timeout == TIMEOUT_NEVER) &&
-							(current_step_index - contact->timeout_sent > contact->pkt_timeout);
+							((current_step_index - contact->timeout_sent) > contact->between_kas);
 					if (needs_ka) {
+						result->msg = TREE_MSG_KA(contact->distance);
 						goto send_keepalive;
 					}
 				}
 			}
-		}
 	}
+		}
 
-	if (ctx->my_node == 0) printf("\nLast node (distance=%u) is %lu: %i %i %i %i (distance=%u)", distance, ctx->contacts[idx-1].node, considered_dead, fits_service_cycle, needs_ack, needs_ka, ctx->contacts[idx-1].distance);
+	if (ctx->my_node == 0) printf("\n No KA Last node (distance=%u) is %lu: %i %i %i %i (distance=%u)", distance, ctx->contacts[idx-1].node, considered_dead, fits_service_cycle, needs_ack, needs_ka, ctx->contacts[idx-1].distance);
 	return OK;
 
 send_keepalive:
 	/* Send a keep-alive message */
+	printf("\n%lu sends KA to %lu (distance=%u. since_last=%lu, beteen_kas=%lu, needs_ack=%i)", ctx->my_node, contact->node, contact->distance, current_step_index - contact->timeout_sent,  contact->between_kas, needs_ack);
 	assert(contact->timeout == TIMEOUT_NEVER);
 	step_num timeout      = current_step_index + contact->pkt_timeout;
 	contact->timeout      = timeout;
 	contact->timeout_sent = current_step_index;
 	contact->his_timeout  = TIMEOUT_NEVER;
-	result->msg           = TREE_MSG_KA(contact->distance);
 	result->dst           = contact->node;
 	result->timeout       = timeout;
-	printf("\n%lu sends KA to %lu (distance=%u)", ctx->my_node, contact->node, contact->distance);
 	return TREE_PACKET_CHOSEN;
 }
 
@@ -593,7 +610,8 @@ int tree_next(comm_graph_t *graph, send_list_t *in_queue,
 service_distance:
     /* Step #3: Data (from service-distance) comes first, then keep-alives */
     if (queue_get_msg_by_distance(ctx, in_queue, TREE_MSG_DATA, distance, result) ||
-        queue_get_msg_by_distance(ctx, in_queue, TREE_MSG_KEEPALIVE, distance, result)) {
+        queue_get_msg_by_distance(ctx, in_queue, TREE_MSG_KEEPALIVE, distance, result) ||
+        queue_get_msg_by_distance(ctx, in_queue, TREE_MSG_KEEPALIVE_ACK, distance, result)) {
         assert(result->src != ctx->my_node);
         return OK;
     }
