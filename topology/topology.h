@@ -33,8 +33,8 @@ typedef enum model_type
 } model_type_t;
 
 typedef enum tree_service_cycle_method {
-	TREE_SERVICE_CYCLE_CALC = 0,
-	TREE_SERVICE_CYCLE_RANDOM
+	TREE_SERVICE_CYCLE_RANDOM = 0,
+	TREE_SERVICE_CYCLE_CALC
 } tree_service_cycle_method_t; // TODO: implement selection
 
 typedef enum tree_recovery_method
@@ -79,21 +79,21 @@ typedef struct topology_spec
 
 typedef struct send_item {
     node_id       dst;       /* packet destination */
-#define           DESTINATION_UNKNOWN ((node_id)-1)
-#define           DESTINATION_SPREAD  ((node_id)-2)
-#define           DESTINATION_DEAD    ((node_id)-3)
-#define           DESTINATION_IDLE    ((node_id)-4)
+#define           DESTINATION_UNKNOWN  ((node_id)-1)
+#define           DESTINATION_SPREAD   ((node_id)-2)
+#define           DESTINATION_DEAD     ((node_id)-3)
+#define           DESTINATION_IDLE     ((node_id)-4)
     node_id       src;       /* packet source (sender) */
-#define           SOURCE_EXPECTED     ((node_id)-1)
     msg_type      msg;       /* packet type (per-protocol) */
+#define           MSG_DEATH            ((msg_type)-1)
     step_num      distance;  /* packet distance (time to be delayed in queue) */
-#define           DISTANCE_VACANT    (0)
-#define           DISTANCE_NO_PACKET (0)
-#define           DISTANCE_SEND_NOW  (1)
+#define           DISTANCE_VACANT      (0)
+#define           DISTANCE_NO_PACKET   (0)
+#define           DISTANCE_SEND_NOW    (1)
     step_num      timeout;   /* packet timeout (after which consider peer dead),
                                 after subtracting the initial send distance */
     unsigned char *bitfield; /* pointer to the packet data - MUST BE LAST MEMBER */
-#define           BITFIELD_IGNORE_DATA   (NULL)
+#define           BITFIELD_IGNORE_DATA (NULL)
 } send_item_t;
 
 typedef struct send_list {
@@ -111,8 +111,8 @@ typedef struct topology_iterator {
 
     step_num     start_offset;   /* When does this node start the collective algorithm */
     step_num     death_offset;   /* When does this node stop the collective algorithm */
-#define          NODE_IS_DEAD     ((unsigned)-1)
-#define          NODE_IS_IMORTAL  ((unsigned)-2)
+#define          NODE_IS_DEAD    ((step_num)-1)
+#define          NODE_IS_IMORTAL ((step_num)-2)
 
     step_num     finish;        /* When did this node "leave" the collective */
     char         ctx[0];        /* internal context, type depends on topology */
