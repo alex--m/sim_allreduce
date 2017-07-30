@@ -5,6 +5,7 @@
 comm_graph_t *current_topology = NULL;
 unsigned current_reference_count = 0;
 extern topo_funcs_t topo_map[];
+unsigned topology_max_offset = 0;
 
 /*
  * OPTIMIZATION: Find an iterator allocation size which will work for all types
@@ -101,6 +102,10 @@ int topology_iterator_create(topology_spec_t *spec,
     /* Set the rest of the context */
     iterator->finish = 0;
     iterator->start_offset = topology_choose_offset(spec);
+    if (topology_max_offset < iterator->start_offset) {
+    	topology_max_offset = iterator->start_offset;
+    }
+
     memset(&iterator->in_queue, 0, sizeof(iterator->in_queue));
     if (((spec->model_type == COLLECTIVE_MODEL_NODES_MISSING) ||
     	 (spec->model_type == COLLECTIVE_MODEL_REAL)) &&
@@ -145,10 +150,10 @@ int topology_iterator_next(topology_spec_t *spec, topo_funcs_t *funcs,
 }
 
 int topology_iterator_omit(topology_iterator_t *iterator, topo_funcs_t *funcs,
-                           tree_recovery_method_t method, node_id broken)
+                           tree_recovery_method_t method, node_id source, int source_is_dead)
 {
 	/* Special case: kill the current node */
-	if (broken == 0) {
+	if ((source == 0) && (source_is_dead)) {
     	SET_DEAD(iterator);
     	return OK;
 	}
@@ -157,7 +162,7 @@ int topology_iterator_omit(topology_iterator_t *iterator, topo_funcs_t *funcs,
         iterator->graph = comm_graph_clone(current_topology);
     }
 
-    return funcs->fix_f(iterator->graph, iterator->ctx, method, broken);
+    return funcs->fix_f(iterator->graph, iterator->ctx, method, source, source_is_dead);
 }
 
 void topology_iterator_destroy(topology_iterator_t *iterator, topo_funcs_t *funcs)

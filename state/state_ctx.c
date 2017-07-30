@@ -240,7 +240,7 @@ static inline int state_process(state_t *state, send_item_t *incoming)
         	assert(incoming->msg == MSG_DEATH);
         	assert(state->spec->model_type > COLLECTIVE_MODEL_SPREAD);
             ret_val = topology_iterator_omit(GET_ITERATOR(state, incoming->src),
-            		state->funcs, state->spec->topology.tree.recovery, incoming->dst);
+            		state->funcs, state->spec->topology.tree.recovery, incoming->dst, 1);
             SET_NEW_BIT(state, incoming->src, incoming->dst);
             if (POPCOUNT(state, incoming->src) == state->spec->node_count) {
             	SET_FULL(state, incoming->src);
@@ -279,43 +279,6 @@ static inline int state_dequeue(state_t *state)
     }
 
     return ret_val;
-}
-
-static inline int topology_iterator_omit_recursive(state_t *state, node_id destination, node_id source, int ugly) //TODO: make pretty
-{
-	int ret;
-	node_id father;
-	topology_iterator_t *iterator;
-	if (source == destination) {
-		return OK;
-	}
-
-	iterator = GET_ITERATOR(state, destination);
-	if (destination > source) {
-		/* destination is in source's subtree */
-		father = destination;
-		ret = OK;
-		do {
-			assert(iterator->graph->nodes[father].directions[COMM_GRAPH_FATHERS]->node_count);
-			father = iterator->graph->nodes[father].directions[COMM_GRAPH_FATHERS]->nodes[0];
-			if (father != source) {
-				ret = topology_iterator_omit(iterator, state->funcs, state->spec->topology.tree.recovery, father);
-			}
-		} while ((ret == OK) && (father != source));
-		return ret;
-	}
-
-	assert(iterator->graph->nodes[source].directions[COMM_GRAPH_FATHERS]->node_count);
-	father = iterator->graph->nodes[source].directions[COMM_GRAPH_FATHERS]->nodes[0];
-	ret = topology_iterator_omit_recursive(state, destination, father, 1);
-	if (ret != OK) {
-		return ret;
-	}
-
-	if (!ugly) {
-		return OK;
-	}
-	return ugly ? topology_iterator_omit(iterator, state->funcs, state->spec->topology.tree.recovery, source) : OK;
 }
 
 /* generate a list of packets to be sent out to other peers (for MPI_Alltoallv) */
@@ -371,8 +334,8 @@ int state_next_step(state_t *state)
             			MERGE(state, idx, res.bitfield);
             		}
             		if (res.msg == MSG_DEATH) {
-            			printf("\nTree asked to kill from %lu!!", res.src);
-            			ret_val = topology_iterator_omit_recursive(state, idx, res.src, 0);
+                        ret_val = topology_iterator_omit(GET_ITERATOR(state, idx),
+                        		state->funcs, state->spec->topology.tree.recovery, res.src, 0);
 						if (ret_val != OK) {
 							return ret_val;
 						}
@@ -436,7 +399,8 @@ int state_next_step(state_t *state)
         /* Find longest queue ever */
         for (idx = 1; idx < state->spec->node_count; idx++) {
         	iterator = GET_ITERATOR(state, idx);
-        	if (state->stats.max_queueu_len < iterator->in_queue.max) {
+        	if ((!IS_DEAD(iterator)) &&
+        	    (state->stats.max_queueu_len < iterator->in_queue.max)) {
         		state->stats.max_queueu_len = iterator->in_queue.max;
         	}
         }
@@ -445,7 +409,8 @@ int state_next_step(state_t *state)
         // Note: Does NOT include #0 for spread calculation!
         for (idx = 1; idx < state->spec->node_count; idx++) {
         	iterator = GET_ITERATOR(state, idx);
-        	if (state->stats.first_step_counter > iterator->finish) {
+        	if ((!IS_DEAD(iterator)) &&
+        		(state->stats.first_step_counter < iterator->finish)) {
         		state->stats.first_step_counter = iterator->finish;
         	}
         }

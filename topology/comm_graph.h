@@ -14,13 +14,10 @@ typedef unsigned long msg_type;
 
 enum comm_graph_direction_type {
     COMM_GRAPH_CHILDREN = 0,  /* Children in a tree, or just next nodes in flow-like graphs */
-    COMM_GRAPH_FATHERS,       /* Fathers in a tree */
-
-    COMM_GRAPH_EXCLUDE,       /* Nodes to avoid during fault-tolerance */
-
     COMM_GRAPH_EXTRA_CHILDREN,/* New sons, results of fault-tolerance */
+    COMM_GRAPH_FATHERS,       /* Fathers in a tree */
     COMM_GRAPH_EXTRA_FATHERS, /* New fathers, results of fault-tolerance */
-
+    COMM_GRAPH_EXCLUDE,       /* Nodes to avoid during fault-tolerance */
     COMM_GRAPH_MAX_DIMENTIONS /* MUST BE LAST */
 };
 
@@ -42,6 +39,7 @@ typedef struct comm_graph_node {
 typedef struct comm_graph {
     int is_bidirectional;
     node_id node_count;
+    unsigned max_depth;
     comm_graph_node_t nodes[0];
 } comm_graph_t;
 

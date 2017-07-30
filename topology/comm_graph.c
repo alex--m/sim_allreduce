@@ -68,7 +68,9 @@ comm_graph_t* comm_graph_clone(comm_graph_t* original)
     if (!res) {
         return NULL;
     }
+    res->max_depth = original->max_depth;
 
+    /* (Deep-)copy node structure */
     for (node_index = 0, new_node = res->nodes, node = original->nodes;
          node_index < original->node_count;
          node_index++, new_node++, node++) {
@@ -126,7 +128,15 @@ int comm_graph_append(comm_graph_t* comm_graph, node_id src, node_id dst,
     /* Sanity checks */
     assert(src < comm_graph->node_count);
     assert(dst < comm_graph->node_count);
-    assert((src != dst) || (direction == COMM_GRAPH_EXCLUDE));
+
+    if (direction == COMM_GRAPH_EXCLUDE) {
+    	int index = COMM_GRAPH_LOCATE(node, COMM_GRAPH_EXCLUDE, dst);
+    	if (index != -1) {
+    		return DONE;
+    	}
+    } else {
+    	assert(src != dst);
+    }
 
     /* Make the connection in the graph */
     COMM_GRAPH_DIRECTION_APPEND(node, direction, dst);

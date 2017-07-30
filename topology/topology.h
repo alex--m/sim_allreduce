@@ -133,7 +133,7 @@ typedef struct topo_funcs
     int    (*next_f)(comm_graph_t *graph, send_list_t *in_queue,
                      void *internal_ctx, send_item_t *result);
     int    (*fix_f)(comm_graph_t *graph, void *internal_ctx,
-                    tree_recovery_method_t method, node_id broken);
+                    tree_recovery_method_t method, node_id source, int source_is_dead);
     void   (*stop_f)(void *internal_ctx);
 } topo_funcs_t;
 
@@ -150,6 +150,6 @@ int topology_iterator_next(topology_spec_t *spec, topo_funcs_t *funcs,
                            topology_iterator_t *iterator, send_item_t *result);
 
 int topology_iterator_omit(topology_iterator_t *iterator, topo_funcs_t *funcs,
-                           tree_recovery_method_t method, node_id broken);
+                           tree_recovery_method_t method, node_id source, int source_is_dead);
 
 void topology_iterator_destroy(topology_iterator_t *iterator, topo_funcs_t *funcs);

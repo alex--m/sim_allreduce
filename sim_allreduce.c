@@ -88,6 +88,7 @@ int sim_test_iteration(sim_spec_t *spec, raw_stats_t *stats)
     return state_get_raw_stats(spec->state, stats);
 }
 
+extern unsigned topology_max_offset;
 int sim_test(sim_spec_t *spec)
 {
     int ret_val = OK;
@@ -118,6 +119,7 @@ int sim_test(sim_spec_t *spec)
     memset(&spec->msgs,       0, sizeof(stats_t));
     memset(&spec->data,       0, sizeof(stats_t));
     memset(&spec->queue,      0, sizeof(stats_t));
+    memset(&spec->dead,       0, sizeof(stats_t));
 
     for (test_index = 0;
          ((test_index < my_test_count) && (ret_val == OK));
@@ -128,11 +130,13 @@ int sim_test(sim_spec_t *spec)
 
         /* Collect statistics */
         stats_calc(&spec->steps,      raw.last_step_counter);
+        stats_calc(&spec->in_spread,  topology_max_offset);
         stats_calc(&spec->out_spread, raw.last_step_counter - raw.first_step_counter);
         stats_calc(&spec->msgs,       raw.messages_counter);
         stats_calc(&spec->data,       raw.data_len_counter);
         stats_calc(&spec->queue,      raw.max_queueu_len);
         stats_calc(&spec->dead,       raw.death_toll);
+        topology_max_offset = 0;
     }
 
     /* If multiple tests were done on multiple processes - aggregate */
