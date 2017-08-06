@@ -118,7 +118,9 @@ int state_create(topology_spec_t *spec, state_t *old_state, state_t **new_state)
 				dead_node = CYCLIC_RANDOM(spec, spec->node_count);
 			} while (dead_node == 0);
 			SET_DEAD(GET_ITERATOR(ctx, dead_node));
-			printf("OFFLINE DEAD: %lu\n", dead_node);
+			if (spec->verbose) {
+				printf("OFFLINE DEAD: %lu\n", dead_node);
+			}
 		}
     }
 
@@ -132,8 +134,10 @@ int state_create(topology_spec_t *spec, state_t *old_state, state_t **new_state)
 			} while (dead_node == 0);
 			GET_ITERATOR(ctx, dead_node)->death_offset =
 					CYCLIC_RANDOM(spec, spec->latency * (int)log10(spec->node_count));
-			printf("ONLINE DEAD: %lu (at step #%lu)\n", dead_node, GET_ITERATOR(ctx, dead_node)->death_offset);
 			// TODO: find a better upper-limit!
+			if (spec->verbose) {
+				printf("ONLINE DEAD: %lu (at step #%lu)\n", dead_node, GET_ITERATOR(ctx, dead_node)->death_offset);
+			}
 		}
     }
 
@@ -143,8 +147,24 @@ int state_create(topology_spec_t *spec, state_t *old_state, state_t **new_state)
 
 static inline int state_enqueue(state_t *state, send_item_t *sent, send_list_t *list)
 {
-    unsigned slot_idx = 0, slot_size = CTX_BITFIELD_SIZE(state);
+    unsigned slot_idx = 0, slot_size;
     send_item_t *item;
+
+    if (sent == NULL) {
+    	/* Enqueue all items from list into the global list */
+    	for (item = list->items; slot_idx < list->allocated; item++, slot_idx++) {
+    		if (item->distance != DISTANCE_VACANT) {
+    			int ret = state_enqueue(state, item, NULL);
+    			item->distance = DISTANCE_VACANT;
+    			if (ret != OK) {
+    				return ret;
+    			}
+    		}
+    	}
+		list->used = 0;
+		list->next = 0;
+    	return OK;
+    }
 
     if (sent->distance == DISTANCE_NO_PACKET) {
         return OK;
@@ -158,7 +178,11 @@ static inline int state_enqueue(state_t *state, send_item_t *sent, send_list_t *
     }
 
     /* make sure chuck has free slots */
+
+    slot_size = state ? CTX_BITFIELD_SIZE(state) : 0;
     if (list->allocated == list->used) {
+    	assert(state != 0); /* Hack: no way to get slot_size unless state is given... */
+
         /* extend chuck */
         if (list->allocated == 0) {
             list->allocated = 2 * state->spec->node_count;
@@ -221,6 +245,10 @@ static inline int state_enqueue(state_t *state, send_item_t *sent, send_list_t *
     return OK;
 }
 
+int global_enqueue(send_item_t *sent, send_list_t *queue) {
+	return state_enqueue(NULL, sent, queue);
+}
+
 static inline int state_process(state_t *state, send_item_t *incoming)
 {
     int ret_val = OK;
@@ -240,7 +268,11 @@ static inline int state_process(state_t *state, send_item_t *incoming)
         	assert(incoming->msg == MSG_DEATH);
         	assert(state->spec->model_type > COLLECTIVE_MODEL_SPREAD);
             ret_val = topology_iterator_omit(GET_ITERATOR(state, incoming->src),
-            		state->funcs, state->spec->topology.tree.recovery, incoming->dst, 1);
+            		state->funcs, state->spec->topology.tree.recovery,
+					GET_ITERATOR(state, incoming->dst), 1);
+            if (ret_val == OK) {
+            	ret_val = state_enqueue(state, NULL, &GET_ITERATOR(state, incoming->dst)->in_queue);
+            }
             SET_NEW_BIT(state, incoming->src, incoming->dst);
             if (POPCOUNT(state, incoming->src) == state->spec->node_count) {
             	SET_FULL(state, incoming->src);
@@ -335,7 +367,12 @@ int state_next_step(state_t *state)
             		}
             		if (res.msg == MSG_DEATH) {
                         ret_val = topology_iterator_omit(GET_ITERATOR(state, idx),
-                        		state->funcs, state->spec->topology.tree.recovery, res.src, 0);
+                        		state->funcs, state->spec->topology.tree.recovery,
+								GET_ITERATOR(state, res.src), 0);
+						if (ret_val != OK) {
+							return ret_val;
+						}
+						ret_val = state_enqueue(state, NULL, &GET_ITERATOR(state, res.src)->in_queue);
 						if (ret_val != OK) {
 							return ret_val;
 						}
@@ -353,7 +390,7 @@ int state_next_step(state_t *state)
         }
 
         /* optionally, output debug information */
-        if (state->spec->verbose) {
+        if (state->spec->verbose > 1) { // TODO: define 1...
             if (idx == 0) {
                 printf("\n");
             }

@@ -149,11 +149,14 @@ int topology_iterator_next(topology_spec_t *spec, topo_funcs_t *funcs,
     return funcs->next_f(graph, &iterator->in_queue, iterator->ctx, result);
 }
 
-int topology_iterator_omit(topology_iterator_t *iterator, topo_funcs_t *funcs,
-                           tree_recovery_method_t method, node_id source, int source_is_dead)
+int topology_iterator_omit(topology_iterator_t *iterator,
+						   topo_funcs_t *funcs,
+                           tree_recovery_method_t method,
+						   topology_iterator_t *source_iterator,
+						   int source_is_dead)
 {
 	/* Special case: kill the current node */
-	if ((source == 0) && (source_is_dead)) {
+	if (source_iterator == NULL) {
     	SET_DEAD(iterator);
     	return OK;
 	}
@@ -162,7 +165,11 @@ int topology_iterator_omit(topology_iterator_t *iterator, topo_funcs_t *funcs,
         iterator->graph = comm_graph_clone(current_topology);
     }
 
-    return funcs->fix_f(iterator->graph, iterator->ctx, method, source, source_is_dead);
+    /* If you though you're done - you're not! */
+    iterator->finish = 0;
+
+    return funcs->fix_f(iterator->graph, iterator->ctx, method, source_iterator->ctx,
+    		&source_iterator->in_queue, source_is_dead);
 }
 
 void topology_iterator_destroy(topology_iterator_t *iterator, topo_funcs_t *funcs)

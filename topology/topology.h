@@ -105,6 +105,9 @@ typedef struct send_list {
     unsigned      max;       /* Maximal number of pending elements ever */
 } send_list_t;
 
+/* To be called from wthin individual topologies */
+int global_enqueue(send_item_t *sent, send_list_t *queue);
+
 typedef struct topology_iterator {
     comm_graph_t *graph;        /* Pointer to the graph - changes upon node failures */
     send_list_t  in_queue;      /* Stores incoming messages to this node */
@@ -133,7 +136,8 @@ typedef struct topo_funcs
     int    (*next_f)(comm_graph_t *graph, send_list_t *in_queue,
                      void *internal_ctx, send_item_t *result);
     int    (*fix_f)(comm_graph_t *graph, void *internal_ctx,
-                    tree_recovery_method_t method, node_id source, int source_is_dead);
+                    tree_recovery_method_t method, void *source_ctx,
+					send_list_t *source_queue, int source_is_dead);
     void   (*stop_f)(void *internal_ctx);
 } topo_funcs_t;
 
@@ -149,7 +153,10 @@ int topology_iterator_create(topology_spec_t *spec,
 int topology_iterator_next(topology_spec_t *spec, topo_funcs_t *funcs,
                            topology_iterator_t *iterator, send_item_t *result);
 
-int topology_iterator_omit(topology_iterator_t *iterator, topo_funcs_t *funcs,
-                           tree_recovery_method_t method, node_id source, int source_is_dead);
+int topology_iterator_omit(topology_iterator_t *iterator,
+						   topo_funcs_t *funcs,
+                           tree_recovery_method_t method,
+						   topology_iterator_t *source_iterator,
+						   int source_is_dead);
 
 void topology_iterator_destroy(topology_iterator_t *iterator, topo_funcs_t *funcs);

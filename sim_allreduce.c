@@ -75,7 +75,7 @@ int sim_test_iteration(sim_spec_t *spec, raw_stats_t *stats)
             spec->topology.step_index++;
 
             /* Sanity check: make sure we're not stuck indefinitely! */
-            if ((spec->node_count * 40 < spec->topology.step_index)) {
+            if ((spec->node_count * 1000 < spec->topology.step_index)) {
             	return ERROR;
             }
         }
@@ -497,7 +497,7 @@ int sim_coll_parse_args(int argc, char **argv, sim_spec_t *spec)
             break;
 
         case 'v':
-            spec->topology.verbose = 1;
+            spec->topology.verbose++;
             break;
 
         case 'h':

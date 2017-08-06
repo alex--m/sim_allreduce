@@ -194,23 +194,50 @@ int comm_graph_copy(comm_graph_t* comm_graph, node_id src, node_id dst,
     return OK;
 }
 
-static void recursive_print(comm_graph_t* comm_graph, node_id node, int level)
+static void recursive_print(comm_graph_t* comm_graph, node_id node, unsigned level, unsigned last_on_level, unsigned spaces)
 {
+	unsigned spacer;
     node_id iterator;
-    comm_graph_direction_ptr_t next = comm_graph->nodes[node].directions[0];
-    for (iterator = 0; iterator < next->node_count; iterator++) {
-        if (next->nodes[iterator] > node) {
-            recursive_print(comm_graph, next->nodes[iterator], level + 1);
-        }
-    }
+    comm_graph_direction_ptr_t next = comm_graph->nodes[node].directions[COMM_GRAPH_CHILDREN];
+    if (level) {
+    	for (iterator = 0; iterator < level - 1; iterator++) {
+    		printf("|");
+    		for (spacer = 0; spacer < spaces; spacer++) {
+    			printf(" ");
+    		}
+    	}
 
-    for (iterator = 0; iterator < level; iterator++) {
-        printf("    ");
+    	printf("L");
+    	for (spacer = 0; spacer < spaces; spacer++) {
+    		printf("_");
+    	}
     }
     printf("%lu\n", node);
+
+    if (next->node_count) {
+    	for (iterator = 0; iterator < next->node_count - 1; iterator++) {
+    		if (next->nodes[iterator] > node) {
+    			recursive_print(comm_graph, next->nodes[iterator], level + 1, level + 1, spaces);
+    		}
+    	}
+    	recursive_print(comm_graph, next->nodes[iterator], level + 1, last_on_level, spaces);
+    }
 }
 
 void comm_graph_print(comm_graph_t* comm_graph)
 {
-    recursive_print(comm_graph, 0, 0);
+	int spaces;
+    node_id iterator;
+    comm_graph_direction_ptr_t next = comm_graph->nodes[0].directions[COMM_GRAPH_FATHERS];
+
+    /* Count required node ID width */
+    for (spaces = 1, iterator = comm_graph->node_count; iterator; spaces++, iterator /= 10);
+
+    /* Start from tree root */
+    recursive_print(comm_graph, 0, 0, 0, spaces);
+
+    /* for Multi-root trees */
+    for (iterator = 0; iterator < next->node_count; iterator++) {
+    	recursive_print(comm_graph, next->nodes[iterator], 0, 0, spaces);
+    }
 }

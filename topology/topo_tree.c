@@ -548,8 +548,8 @@ static inline int tree_pending_keepalives(tree_context_t *ctx, step_num *eta,
 					}
 				}
 			}
-	}
 		}
+	}
 
 	return OK;
 
@@ -688,7 +688,7 @@ int tree_fix_peer(tree_context_t *ctx, tree_recovery_method_t recovery, node_id 
 
         for (; idx < ctx->graph->nodes[me].directions[dst_dir]->node_count; idx++) {
         	extra = ctx->graph->nodes[me].directions[dst_dir]->nodes[idx];
-        	printf("Added New peer: %lu (as father? %i)\n", extra, is_father_dead);
+        	//printf("Added New peer: %lu (as father? %i)\n", extra, is_father_dead);
         	ret = tree_contact_lookup(ctx, extra, dead_distance, &contact);
         	if (ret != OK) {
         		return ret;
@@ -710,17 +710,45 @@ int tree_fix_peer(tree_context_t *ctx, tree_recovery_method_t recovery, node_id 
     return ret;
 }
 
+
+
 int tree_fix(comm_graph_t *graph, tree_context_t *ctx,
-             tree_recovery_method_t recovery, node_id source, int source_is_dead)
+             tree_recovery_method_t recovery, tree_context_t *source_ctx,
+			 send_list_t *source_queue, int source_is_dead)
 {
-    node_id idx, jdx = 0, tmp, me = ctx->my_node;
+    node_id idx, jdx = 0, tmp, me = ctx->my_node, source = source_ctx->my_node;
     int is_father_dead, ret;
     node_id *kill_route;
 
-    printf("\nOMIT: %lu asked %lu to omit... (itself? %i)\n", source, me, source_is_dead); // TODO: remove!
+    //printf("\nOMIT: %lu asked %lu to omit... (itself? %i)\n", source, me, source_is_dead); // TODO: remove!
 
     /* Update my pointer to the cloned graph */
     ctx->graph = graph;
+
+    /* kill all contacts that are waiting... */
+    if (source_is_dead) {
+    	tree_contact_t *contact;
+    	for (idx = 0; idx < source_ctx->contacts_used; idx++) {
+    		contact = &source_ctx->contacts[idx];
+    		int considered_dead = (contact->distance == DISTANCE_VACANT);
+    		if (!considered_dead) {
+    			if (contact->his_timeout != TIMEOUT_NEVER) {
+    				send_item_t new;
+    				new.dst              = source;
+    				new.src              = contact->node;
+    				new.msg              = MSG_DEATH;
+    				new.distance         = contact->his_timeout;
+    				new.timeout          = 0;
+    				new.bitfield         = BITFIELD_IGNORE_DATA;
+    				contact->his_timeout = TIMEOUT_NEVER;
+    				ret                  = global_enqueue(&new, source_queue);
+    				if (ret != OK) {
+    					return ret;
+    				}
+    			}
+    		}
+    	}
+    }
 
     /* Calculate route (in nodes) from myself to the dead node */
     kill_route = alloca(sizeof(node_id) * graph->max_depth);
@@ -732,10 +760,12 @@ int tree_fix(comm_graph_t *graph, tree_context_t *ctx,
     			jdx = 0;
     		}
     	}
-    	for (idx = 0; idx < jdx; idx++) {
-    		tmp = kill_route[idx];
-    		kill_route[idx] = kill_route[jdx - idx - 1];
-    		kill_route[jdx - idx - 1] = tmp;
+    	if (jdx > 1) {
+    		for (idx = 0; idx < (jdx / 2); idx++) {
+    			tmp = kill_route[idx];
+    			kill_route[idx] = kill_route[jdx - idx - 1];
+    			kill_route[jdx - idx - 1] = tmp;
+    		}
     	}
     	is_father_dead = 0; /* Children are adopted */
     } else {
@@ -751,7 +781,9 @@ int tree_fix(comm_graph_t *graph, tree_context_t *ctx,
         }
     	is_father_dead = 1; /* Grandfather contacted */
     }
-    if ((idx == 0) && (me != 0) && (source != 0)) {
+
+    if ((idx == 0) && (me > 0) && (source != 0) &&
+    	(me <= graph->nodes[0].directions[COMM_GRAPH_FATHERS]->node_count)) {
     	is_father_dead = 0; /* Children are adopted */
     }
 
@@ -765,13 +797,16 @@ int tree_fix(comm_graph_t *graph, tree_context_t *ctx,
 
     if (is_father_dead) {
         /* Reset the count on received nodes - so new nodes may be considered */
-        ctx->order_indicator = ORDER_NEW_FATHERS;
+    	if (ctx->order_indicator > ORDER_NEW_FATHERS) {
+    		ctx->order_indicator = ORDER_NEW_FATHERS;
+    	    ctx->next_send_index = 0;
+    	}
     } else {
     	/* Start waiting anew */
     	ctx->order_indicator = 0;
     	ctx->next_wait_index = 0;
+    	ctx->next_send_index = 0;
     }
-    ctx->next_send_index = 0;
     return OK;
 }
 
@@ -909,7 +944,7 @@ int tree_build(topology_spec_t *spec, comm_graph_t **graph)
         }
     }
 
-    if (spec->verbose) {
+    if (spec->verbose > 1) { // TODO: define 1
         for (first_child = 0; first_child < node_count; first_child++) {
             printf("#%lu\tSubtree-ETA=%lu\tFull-tree-ETA=%lu\n", first_child,
                     (*graph)->nodes[first_child].data_eta[DATA_ETA_SUBTREE],
