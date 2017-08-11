@@ -116,8 +116,8 @@ int sim_test(sim_spec_t *spec)
     memset(&spec->steps,      0, sizeof(stats_t));
     memset(&spec->in_spread,  0, sizeof(stats_t));
     memset(&spec->out_spread, 0, sizeof(stats_t));
-    memset(&spec->msgs,       0, sizeof(stats_t));
     memset(&spec->data,       0, sizeof(stats_t));
+    memset(&spec->msgs,       0, sizeof(stats_t));
     memset(&spec->queue,      0, sizeof(stats_t));
     memset(&spec->dead,       0, sizeof(stats_t));
 
@@ -128,15 +128,17 @@ int sim_test(sim_spec_t *spec)
         /* Run the a single iteration (independent) of the test */
         ret_val = sim_test_iteration(spec, &raw);
 
-        /* Collect statistics */
-        stats_calc(&spec->steps,      raw.last_step_counter);
-        stats_calc(&spec->in_spread,  topology_max_offset);
-        stats_calc(&spec->out_spread, raw.last_step_counter - raw.first_step_counter);
-        stats_calc(&spec->msgs,       raw.messages_counter);
-        stats_calc(&spec->data,       raw.data_len_counter);
-        stats_calc(&spec->queue,      raw.max_queueu_len);
-        stats_calc(&spec->dead,       raw.death_toll);
-        topology_max_offset = 0;
+        if (ret_val == OK) {
+        	/* Collect statistics */
+        	stats_calc(&spec->steps,      raw.last_step_counter);
+        	stats_calc(&spec->in_spread,  topology_max_offset);
+        	stats_calc(&spec->out_spread, raw.last_step_counter - raw.first_step_counter);
+        	stats_calc(&spec->data,       raw.data_len_counter);
+        	stats_calc(&spec->msgs,       raw.messages_counter);
+        	stats_calc(&spec->queue,      raw.max_queueu_len);
+        	stats_calc(&spec->dead,       raw.death_toll);
+        	topology_max_offset = 0;
+        }
     }
 
     /* If multiple tests were done on multiple processes - aggregate */
@@ -144,8 +146,8 @@ int sim_test(sim_spec_t *spec)
         stats_aggregate(&spec->steps,      is_root);
         stats_aggregate(&spec->in_spread,  is_root);
         stats_aggregate(&spec->out_spread, is_root);
-        stats_aggregate(&spec->msgs,       is_root);
         stats_aggregate(&spec->data,       is_root);
+        stats_aggregate(&spec->msgs,       is_root);
         stats_aggregate(&spec->queue,      is_root);
         stats_aggregate(&spec->dead,       is_root);
     }

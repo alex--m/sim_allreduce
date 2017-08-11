@@ -172,9 +172,13 @@ static inline int state_enqueue(state_t *state, send_item_t *sent, send_list_t *
 
     if (list == NULL) {
     	list = &state->outq;
-    	state->stats.data_len_counter += POPCOUNT_HERE(sent->bitfield,
-    			state->spec->node_count);
-    	state->stats.messages_counter++;
+    	if (sent->msg != MSG_DEATH) {
+    		/* Count this message and it's length */
+    		state->stats.messages_counter++;
+    		assert(sent->bitfield != BITFIELD_IGNORE_DATA);
+    		state->stats.data_len_counter += POPCOUNT_HERE(sent->bitfield,
+    				state->spec->node_count);
+    	}
     }
 
     /* make sure chuck has free slots */
@@ -221,8 +225,8 @@ static inline int state_enqueue(state_t *state, send_item_t *sent, send_list_t *
     	slot_idx = list->next;
 
         /* find next slot available */
-        while ((list->items[slot_idx].distance != DISTANCE_VACANT) &&
-        	   (slot_idx < list->allocated)) {
+        while ((slot_idx < list->allocated) &&
+        	   (list->items[slot_idx].distance != DISTANCE_VACANT)) {
             slot_idx++;
         }
 
@@ -231,6 +235,7 @@ static inline int state_enqueue(state_t *state, send_item_t *sent, send_list_t *
         	while (list->items[slot_idx].distance != DISTANCE_VACANT) {
 				slot_idx++;
 			}
+        	assert(slot_idx < list->allocated);
         }
     }
 
@@ -429,8 +434,8 @@ int state_next_step(state_t *state)
     if ((active_count - dead_count) == 0) {
     	topology_iterator_t *iterator   = GET_ITERATOR(state, 0);
         state->stats.max_queueu_len     = iterator->in_queue.max;
-        state->stats.last_step_counter  = state->spec->step_index;
         state->stats.first_step_counter = iterator->finish;
+        state->stats.last_step_counter  = state->spec->step_index;
         state->stats.death_toll         = dead_count;
 
         /* Find longest queue ever */
