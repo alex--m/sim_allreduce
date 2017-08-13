@@ -52,14 +52,13 @@ typedef struct tree_context {
 
 
 enum tree_msg_type {
-	/* Message #0 is reserved for death! */
-    TREE_MSG_DATA          = 1,
+    TREE_MSG_DATA          = 0,
 #define TREE_MSG_DATA(distance)   (TREE_MSG_DATA          + TREE_MSG_MAX * distance)
-    TREE_MSG_KEEPALIVE     = 2,
+    TREE_MSG_KEEPALIVE     = 1,
 #define TREE_MSG_KA(distance)     (TREE_MSG_KEEPALIVE     + TREE_MSG_MAX * distance)
-    TREE_MSG_KEEPALIVE_ACK = 3,
+    TREE_MSG_KEEPALIVE_ACK = 2,
 #define TREE_MSG_ACK(distance)    (TREE_MSG_KEEPALIVE_ACK + TREE_MSG_MAX * distance)
-    TREE_MSG_MAX           = 4,
+    TREE_MSG_MAX           = 3,
 };
 
 enum tree_action {
@@ -275,6 +274,10 @@ static tree_distance_t tree_pick_service_distance(tree_context_t *ctx)
         factor = 1 + (step_index / each_cycle);
         distance = (step_index * factor) / (each_cycle * factor);
         break;
+
+    default:
+    	distance = 0;
+    	break;
     }
     return distance;
 }
@@ -340,7 +343,7 @@ static inline int tree_next_by_topology(tree_context_t *ctx,
     unsigned send_index = ctx->next_send_index;
     comm_graph_node_t *my_node = &ctx->graph->nodes[ctx->my_node];
 
-    for (order_idx = ctx->order_indicator; // TODO: increment order indicator with progress!
+    for (order_idx = ctx->order_indicator;
          order_idx < (sizeof(tree_order) / sizeof(*tree_order));
          order_idx++) {
         enum comm_graph_direction_type dir_type = tree_order[order_idx].direction;
@@ -441,8 +444,9 @@ static inline int tree_handle_incoming_packet(tree_context_t *ctx,
 {
     enum tree_msg_type type = incoming->msg % TREE_MSG_MAX;
     tree_distance_t distance = incoming->msg / TREE_MSG_MAX;
-    tree_contact_t *contact;
+    tree_contact_t *contact = NULL;
 
+    assert(incoming->msg != MSG_DEATH);
     assert(incoming->dst == ctx->my_node);
 
     unsigned used_before = ctx->contacts_used;
@@ -452,12 +456,15 @@ static inline int tree_handle_incoming_packet(tree_context_t *ctx,
 	}
 
     if (used_before != ctx->contacts_used) {
+    	/* If the packet is from a new origin - change the packet to notify upper layer */
     	incoming->msg = MSG_DEATH;
     }
 
     contact->timeout   = TIMEOUT_NEVER;
     contact->last_seen = *ctx->step_index;
-    if ((type != TREE_MSG_KEEPALIVE_ACK) &&
+    if (type == TREE_MSG_KEEPALIVE_ACK) {
+    	contact->his_timeout = TIMEOUT_NEVER;
+    } else if (
     	((contact->his_timeout == TIMEOUT_NEVER) ||
     	 (contact->his_timeout < incoming->timeout))) {
     	contact->his_timeout = incoming->timeout;
@@ -488,7 +495,7 @@ static inline int queue_get_msg_by_distance(tree_context_t *ctx,
                     if (ret == DONE) {
                         result->bitfield = BITFIELD_IGNORE_DATA; // For keep-alive messages
                     } else {
-                        assert(0);
+                        assert(0); /* should never be reached */
                     }
                 }
 
@@ -496,7 +503,7 @@ static inline int queue_get_msg_by_distance(tree_context_t *ctx,
                 it->distance = DISTANCE_VACANT;
                 if (it->msg == MSG_DEATH) {
                 	 /* trigger (external) omission of presumably dead nodes */
-                	result->msg = MSG_DEATH;
+                	result->msg = it->msg;
                 }
                 return TREE_PACKET_CHOSEN;
             }
@@ -510,7 +517,7 @@ static inline int tree_pending_keepalives(tree_context_t *ctx, step_num *eta,
                                           tree_distance_t distance, send_item_t *result)
 {
 	int considered_dead, fits_service_cycle, needs_ka = 0, needs_ack = 0;
-	step_num current_step_index = *ctx->step_index;
+	step_num timeout, current_step_index = *ctx->step_index;
 	tree_contact_t *contact;
 	unsigned idx;
 
@@ -522,6 +529,7 @@ static inline int tree_pending_keepalives(tree_context_t *ctx, step_num *eta,
 			if (fits_service_cycle) {
 				needs_ack = (contact->his_timeout != TIMEOUT_NEVER);
 				if (needs_ack) {
+					timeout     = TIMEOUT_NEVER;
 					result->msg = TREE_MSG_ACK(contact->distance);
 					goto send_keepalive;
 				}
@@ -530,10 +538,9 @@ static inline int tree_pending_keepalives(tree_context_t *ctx, step_num *eta,
 	}
 
 	/* check if the first, partial ETA has elapsed */
-	if (((eta[DATA_ETA_SUBTREE] < current_step_index) && // TODO: once SUBTREE arrives (late) - update the FULL-TREE ETA accordingly
+	if (((eta[DATA_ETA_SUBTREE] < current_step_index) &&
 		 (ctx->order_indicator <= ORDER_SUBTREE_DONE)) ||
 		(eta[DATA_ETA_FULL_TREE] < current_step_index)) {
-		// TODO: Assert BASIC model? shouldn't happen unless delay or failure
 		for (idx = 0; idx < ctx->contacts_used; idx++) {
 			contact = &ctx->contacts[idx];
 			considered_dead = (contact->distance == DISTANCE_VACANT);
@@ -543,7 +550,9 @@ static inline int tree_pending_keepalives(tree_context_t *ctx, step_num *eta,
 					needs_ka = (contact->timeout == TIMEOUT_NEVER) &&
 							((current_step_index - contact->timeout_sent) > contact->between_kas);
 					if (needs_ka) {
-						result->msg = TREE_MSG_KA(contact->distance);
+						result->msg           = TREE_MSG_KA(contact->distance);
+						contact->timeout_sent = current_step_index;
+						timeout               = current_step_index + contact->pkt_timeout;
 						goto send_keepalive;
 					}
 				}
@@ -556,12 +565,10 @@ static inline int tree_pending_keepalives(tree_context_t *ctx, step_num *eta,
 send_keepalive:
 	/* Send a keep-alive message */
 	assert(contact->timeout == TIMEOUT_NEVER);
-	step_num timeout      = current_step_index + contact->pkt_timeout;
-	contact->timeout      = timeout;
-	contact->timeout_sent = current_step_index;
-	contact->his_timeout  = TIMEOUT_NEVER;
-	result->dst           = contact->node;
-	result->timeout       = timeout;
+	contact->timeout     = timeout;
+	contact->his_timeout = TIMEOUT_NEVER;
+	result->dst          = contact->node;
+	result->timeout      = timeout;
 	return TREE_PACKET_CHOSEN;
 }
 
@@ -572,24 +579,31 @@ int tree_next(comm_graph_t *graph, send_list_t *in_queue,
     int ret;
 
     /* Before starting - assert algorithm assumptions to be valid */
-    //tree_validate(ctx);
+    // TODO: tree_validate(ctx);
 
     /* Step #1: If considered still in "computation" - respond only to keep-alives */
     if (graph == NULL) {
+		/* Mark as waiting */
+		result->distance = DISTANCE_NO_PACKET;
+		result->dst      = DESTINATION_SPREAD;
+
+		/* Check for keep-alive messages */
     	ret = queue_get_msg_by_distance(ctx, in_queue, TREE_MSG_KEEPALIVE, ANY_DISTANCE, result);
-    	if (ret) {
+    	if (ret != OK) {
     		if (ret != TREE_PACKET_CHOSEN) {
     			return ret;
     		}
 
-    		/* Reply */
+    		/* Reply! */
     		node_id dst = result->src;
     		result->src = result->dst;
     		result->dst = dst;
+    		result->msg++; /* change to ACK */
     	} else {
-    		/* Mark as waiting */
-    	    result->distance = DISTANCE_NO_PACKET;
-    	    result->dst      = DESTINATION_SPREAD;
+    		ret = queue_get_msg_by_distance(ctx, in_queue, TREE_MSG_KEEPALIVE_ACK, ANY_DISTANCE, result);
+    		if (ret != TREE_PACKET_CHOSEN) {
+    			return ret;
+    		}
     	}
     	return OK;
     }
@@ -720,7 +734,7 @@ int tree_fix(comm_graph_t *graph, tree_context_t *ctx,
     int is_father_dead, ret;
     node_id *kill_route;
 
-    //printf("\nOMIT: %lu asked %lu to omit... (itself? %i)\n", source, me, source_is_dead); // TODO: remove!
+    //printf("\nOMIT: %lu asked %lu to omit... (itself? %i)\n", source, me, source_is_dead);
 
     /* Update my pointer to the cloned graph */
     ctx->graph = graph;
@@ -789,6 +803,7 @@ int tree_fix(comm_graph_t *graph, tree_context_t *ctx,
 
     /* Kill nodes along calculated route */
     for (idx = 0; idx < jdx; idx++) {
+    	//printf("remove peer %lu\n", kill_route[idx]);
     	ret = tree_fix_peer(ctx, recovery, kill_route[idx], is_father_dead);
     	if ((ret != OK) && (ret != DONE)) {
     		return ret;
@@ -944,7 +959,7 @@ int tree_build(topology_spec_t *spec, comm_graph_t **graph)
         }
     }
 
-    if (spec->verbose > 1) { // TODO: define 1
+    if (spec->verbose > 1) {
         for (first_child = 0; first_child < node_count; first_child++) {
             printf("#%lu\tSubtree-ETA=%lu\tFull-tree-ETA=%lu\n", first_child,
                     (*graph)->nodes[first_child].data_eta[DATA_ETA_SUBTREE],

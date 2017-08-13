@@ -165,9 +165,6 @@ int topology_iterator_omit(topology_iterator_t *iterator,
         iterator->graph = comm_graph_clone(current_topology);
     }
 
-    /* If you though you're done - you're not! */
-    iterator->finish = 0;
-
     return funcs->fix_f(iterator->graph, iterator->ctx, method, source_iterator->ctx,
     		&source_iterator->in_queue, source_is_dead);
 }

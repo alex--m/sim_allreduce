@@ -259,30 +259,28 @@ static inline int state_process(state_t *state, send_item_t *incoming)
     int ret_val = OK;
     topology_iterator_t *destination = GET_ITERATOR(state, incoming->dst);
 
+    if (incoming->msg == MSG_DEATH) {
+    	assert(IS_DEAD(GET_ITERATOR(state, incoming->dst)));
+    	assert(state->spec->model_type > COLLECTIVE_MODEL_SPREAD);
+    	SET_NEW_BIT(state, incoming->src, incoming->dst);
+    	if (POPCOUNT(state, incoming->src) == state->spec->node_count) {
+    		SET_FULL(state, incoming->src);
+    	}
+
+    	return topology_iterator_omit(GET_ITERATOR(state, incoming->src),
+    			state->funcs, state->spec->topology.tree.recovery,
+				GET_ITERATOR(state, incoming->dst), 1);
+    }
+
     if (IS_DEAD(destination)) {
-        /* Packet destination is dead */
-    	if (incoming->timeout) {
-    		/* Wait until the timeout to pronounce death */
-    		send_item_t death;
-    		memcpy(&death, incoming, sizeof(send_item_t));
-    		death.distance = death.timeout - state->spec->step_index;
-    		death.msg      = MSG_DEATH;
-    		death.timeout  = 0;
-            ret_val        = state_enqueue(state, &death, NULL);
-        } else {
-        	assert(incoming->msg == MSG_DEATH);
-        	assert(state->spec->model_type > COLLECTIVE_MODEL_SPREAD);
-            ret_val = topology_iterator_omit(GET_ITERATOR(state, incoming->src),
-            		state->funcs, state->spec->topology.tree.recovery,
-					GET_ITERATOR(state, incoming->dst), 1);
-            if (ret_val == OK) {
-            	ret_val = state_enqueue(state, NULL, &GET_ITERATOR(state, incoming->dst)->in_queue);
-            }
-            SET_NEW_BIT(state, incoming->src, incoming->dst);
-            if (POPCOUNT(state, incoming->src) == state->spec->node_count) {
-            	SET_FULL(state, incoming->src);
-            }
-        }
+        /* Packet destination is dead - Wait until the timeout to pronounce death */
+    	send_item_t death;
+    	assert(incoming->timeout);
+    	memcpy(&death, incoming, sizeof(send_item_t));
+    	death.distance = death.timeout - state->spec->step_index;
+    	death.msg      = MSG_DEATH;
+    	death.timeout  = 0;
+    	ret_val        = state_enqueue(state, &death, NULL);
     } else {
     	/* Packet destination is alive */
     	incoming->distance = DISTANCE_SEND_NOW;
@@ -345,11 +343,10 @@ int state_next_step(state_t *state)
             res.distance = DISTANCE_NO_PACKET;
             res.dst = DESTINATION_DEAD;
             dead_count++;
-            ret_val = OK; // For verbose mode
         } else if ((iterator->finish) && (idx != 0)) {
         	/* Already complete (for this node) */
-        	ret_val = DONE;
             active_count--;
+        	ret_val = DONE;
         } else {
             /* Get next the target rank of the next send */
         	res.src = idx; /* Also used for "protecting" #0 from death */
@@ -362,40 +359,35 @@ int state_next_step(state_t *state)
                     	assert(idx == 0);
                     }
                     active_count--;
-                } else {
-                    return ret_val;
+                    ret_val = OK;
                 }
             } else if (res.distance != DISTANCE_NO_PACKET) {
-            	if (res.dst == idx) {
+        		if (res.msg == MSG_DEATH) {
             		if (res.bitfield != BITFIELD_IGNORE_DATA) {
             			MERGE(state, idx, res.bitfield);
             		}
-            		if (res.msg == MSG_DEATH) {
-                        ret_val = topology_iterator_omit(GET_ITERATOR(state, idx),
-                        		state->funcs, state->spec->topology.tree.recovery,
-								GET_ITERATOR(state, res.src), 0);
-						if (ret_val != OK) {
-							return ret_val;
-						}
-						ret_val = state_enqueue(state, NULL, &GET_ITERATOR(state, res.src)->in_queue);
-						if (ret_val != OK) {
-							return ret_val;
-						}
+        			ret_val = topology_iterator_omit(GET_ITERATOR(state, idx),
+        					state->funcs, state->spec->topology.tree.recovery,
+							GET_ITERATOR(state, res.src), 0);
+        		} else if (res.dst == idx) {
+            		if (res.bitfield != BITFIELD_IGNORE_DATA) {
+            			MERGE(state, idx, res.bitfield);
             		}
             	} else {
             		/* Send this outgoing packet */
             		res.src = idx;
             		res.bitfield = GET_OLD_BITFIELD(state, idx);
             		ret_val = state_enqueue(state, &res, NULL);
-            		if (ret_val != OK) {
-            			return ret_val;
-            		}
             	}
+            }
+            if ((ret_val != OK) && (ret_val != DONE)) {
+            	printf("PROBLEM is %i\n", ret_val);
+            	return ret_val;
             }
         }
 
         /* optionally, output debug information */
-        if (state->spec->verbose > 1) { // TODO: define 1...
+        if (state->spec->verbose > 1) {
             if (idx == 0) {
                 printf("\n");
             }
@@ -431,10 +423,11 @@ int state_next_step(state_t *state)
         }
     }
 
+    //printf("active_count=%lu dead_count=%lu diff=%lu\n", active_count, dead_count, (active_count - dead_count) );
     if ((active_count - dead_count) == 0) {
     	topology_iterator_t *iterator   = GET_ITERATOR(state, 0);
         state->stats.max_queueu_len     = iterator->in_queue.max;
-        state->stats.first_step_counter = iterator->finish;
+        state->stats.first_step_counter = state->spec->step_index;
         state->stats.last_step_counter  = state->spec->step_index;
         state->stats.death_toll         = dead_count;
 
@@ -452,7 +445,7 @@ int state_next_step(state_t *state)
         for (idx = 1; idx < state->spec->node_count; idx++) {
         	iterator = GET_ITERATOR(state, idx);
         	if ((!IS_DEAD(iterator)) &&
-        		(state->stats.first_step_counter < iterator->finish)) {
+        		(state->stats.first_step_counter > iterator->finish)) {
         		state->stats.first_step_counter = iterator->finish;
         	}
         }
