@@ -133,7 +133,7 @@ int state_create(topology_spec_t *spec, state_t *old_state, state_t **new_state)
 				dead_node = CYCLIC_RANDOM(spec, spec->node_count);
 			} while (dead_node == 0);
 			GET_ITERATOR(ctx, dead_node)->death_offset =
-					CYCLIC_RANDOM(spec, spec->latency * (int)log10(spec->node_count));
+					CYCLIC_RANDOM(spec, spec->latency * (1 + (int)log10(spec->node_count)));
 			// TODO: find a better upper-limit!
 			if (spec->verbose) {
 				printf("ONLINE DEAD: %lu (at step #%lu)\n", dead_node, GET_ITERATOR(ctx, dead_node)->death_offset);
@@ -316,6 +316,8 @@ static inline int state_dequeue(state_t *state)
     return ret_val;
 }
 
+extern step_num topology_max_offset;
+
 /* generate a list of packets to be sent out to other peers (for MPI_Alltoallv) */
 int state_next_step(state_t *state)
 {
@@ -423,7 +425,11 @@ int state_next_step(state_t *state)
         }
     }
 
-    //printf("active_count=%lu dead_count=%lu diff=%lu\n", active_count, dead_count, (active_count - dead_count) );
+    if (state->spec->verbose) {
+    	printf("step #%lu (spread=%lu): active_count=%lu dead_count=%lu diff=%lu\n",
+    			state->spec->step_index, topology_max_offset,
+				active_count, dead_count, (active_count - dead_count) );
+    }
     if ((active_count - dead_count) == 0) {
     	topology_iterator_t *iterator   = GET_ITERATOR(state, 0);
         state->stats.max_queueu_len     = iterator->in_queue.max;

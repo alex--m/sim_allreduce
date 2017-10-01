@@ -328,6 +328,7 @@ static inline int tree_contact_lookup(tree_context_t *ctx, node_id id,
     (*contact)->distance     = distance;
     (*contact)->node         = id;
     (*contact)->timeout_sent = 0;
+    (*contact)->last_seen    = 0;
     return OK;
 }
 
@@ -521,6 +522,7 @@ static inline int tree_pending_keepalives(tree_context_t *ctx, step_num *eta,
 	tree_contact_t *contact;
 	unsigned idx;
 
+	/* Send ACKs if needed */
 	for (idx = 0; idx < ctx->contacts_used; idx++) {
 		contact = &ctx->contacts[idx];
 		considered_dead = (contact->distance == DISTANCE_VACANT);
@@ -547,8 +549,8 @@ static inline int tree_pending_keepalives(tree_context_t *ctx, step_num *eta,
 			if (!considered_dead) {
 				fits_service_cycle = ((distance == ANY_DISTANCE) || (contact->distance == distance));
 				if (fits_service_cycle) {
-					needs_ka = (contact->timeout == TIMEOUT_NEVER) &&
-							((current_step_index - contact->timeout_sent) > contact->between_kas);
+					needs_ka = (contact->timeout == TIMEOUT_NEVER) && ((contact->last_seen == 0) ||
+							((current_step_index - contact->timeout_sent) > contact->between_kas));
 					if (needs_ka) {
 						result->msg           = TREE_MSG_KA(contact->distance);
 						contact->timeout_sent = current_step_index;
@@ -583,10 +585,6 @@ int tree_next(comm_graph_t *graph, send_list_t *in_queue,
 
     /* Step #1: If considered still in "computation" - respond only to keep-alives */
     if (graph == NULL) {
-		/* Mark as waiting */
-		result->distance = DISTANCE_NO_PACKET;
-		result->dst      = DESTINATION_SPREAD;
-
 		/* Check for keep-alive messages */
     	ret = queue_get_msg_by_distance(ctx, in_queue, TREE_MSG_KEEPALIVE, ANY_DISTANCE, result);
     	if (ret != OK) {
@@ -601,7 +599,11 @@ int tree_next(comm_graph_t *graph, send_list_t *in_queue,
     		result->msg++; /* change to ACK */
     	} else {
     		ret = queue_get_msg_by_distance(ctx, in_queue, TREE_MSG_KEEPALIVE_ACK, ANY_DISTANCE, result);
-    		if (ret != TREE_PACKET_CHOSEN) {
+    		if (ret == OK) {
+    			/* Mark as waiting */
+    			result->distance = DISTANCE_NO_PACKET;
+    			result->dst      = DESTINATION_SPREAD;
+    		} else if (ret != TREE_PACKET_CHOSEN) {
     			return ret;
     		}
     	}
@@ -622,13 +624,12 @@ int tree_next(comm_graph_t *graph, send_list_t *in_queue,
 
 service_distance:
     /* Step #3: Data (from service-distance) comes first, then keep-alives */
-    if (queue_get_msg_by_distance(ctx, in_queue, TREE_MSG_DATA, distance, result) ||
-        queue_get_msg_by_distance(ctx, in_queue, TREE_MSG_KEEPALIVE, distance, result) ||
-        queue_get_msg_by_distance(ctx, in_queue, TREE_MSG_KEEPALIVE_ACK, distance, result)) {
-        assert(result->src != ctx->my_node);
+    if (queue_get_msg_by_distance(ctx, in_queue, TREE_MSG_DATA, distance, result)) {
+    	assert(result->src != ctx->my_node);
         return OK;
     }
 
+    // TODO: move to after step 5??
     /* Step #4: If its time is up - send a keep-alive within service-distance */
     ret = tree_pending_keepalives(ctx, graph->nodes[ctx->my_node].data_eta, distance, result);
     if (ret == TREE_PACKET_CHOSEN) {
@@ -638,7 +639,15 @@ service_distance:
         return ret; /* Typically "ERROR" */
     }
 
-    /* Step #5: Service any other distance (arbitrary) */
+
+    /* Step #5: Data (from service-distance) comes first, then keep-alives */
+    if (queue_get_msg_by_distance(ctx, in_queue, TREE_MSG_KEEPALIVE, distance, result) ||
+        queue_get_msg_by_distance(ctx, in_queue, TREE_MSG_KEEPALIVE_ACK, distance, result)) {
+        assert(result->src != ctx->my_node);
+        return OK;
+    }
+
+    /* Step #6: Service any other distance (arbitrary) */
     if (distance != ANY_DISTANCE) {
         distance = ANY_DISTANCE;
         goto service_distance;

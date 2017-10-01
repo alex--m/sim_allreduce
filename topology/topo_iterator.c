@@ -5,7 +5,7 @@
 comm_graph_t *current_topology = NULL;
 unsigned current_reference_count = 0;
 extern topo_funcs_t topo_map[];
-unsigned topology_max_offset = 0;
+step_num topology_max_offset = 0;
 
 /*
  * OPTIMIZATION: Find an iterator allocation size which will work for all types
@@ -64,7 +64,9 @@ static step_num topology_choose_offset(topology_spec_t *spec)
 {
     if ((spec->model_type == COLLECTIVE_MODEL_SPREAD) ||
     	(spec->model_type == COLLECTIVE_MODEL_REAL)) {
-    	return gaussian_random(spec->model.max_spread, spec);
+    	step_num a = gaussian_random(spec->model.max_spread, spec);
+    	// printf("gaussian_random(%lu)=%lu\n", spec->model.max_spread, a);
+    	return a;
     }
 
     return 0;
