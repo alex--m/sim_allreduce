@@ -881,15 +881,20 @@ int tree_build(topology_spec_t *spec, comm_graph_t **graph)
     if (is_multiroot) {
         (*graph)->max_depth++;
         for (next_father = 0; next_father < tree_radix; next_father++) {
-            for (next_child = 0; next_child < tree_radix; next_child++) {
-                if (next_father != next_child) {
-                    ret = comm_graph_append(*graph, next_father, next_child, COMM_GRAPH_FATHERS);
-                    if (ret != OK) {
-                        comm_graph_destroy(*graph);
-                        return ret;
-                    }
-                }
-            }
+        	for (next_child = next_father + 1; next_child < tree_radix; next_child++) {
+        		ret = comm_graph_append(*graph, next_father, next_child, COMM_GRAPH_FATHERS);
+        		if (ret != OK) {
+        			comm_graph_destroy(*graph);
+        			return ret;
+        		}
+        	}
+        	for (next_child = 0; next_child < next_father; next_child++) {
+        		ret = comm_graph_append(*graph, next_father, next_child, COMM_GRAPH_FATHERS);
+        		if (ret != OK) {
+        			comm_graph_destroy(*graph);
+        			return ret;
+        		}
+        	}
         }
         first_child = tree_radix;
     }
