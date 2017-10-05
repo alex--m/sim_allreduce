@@ -32,6 +32,11 @@ typedef enum model_type
     COLLECTIVE_MODEL_ALL            /* default, must be last */
 } model_type_t;
 
+typedef enum spread_distribution_type {
+	SPREAD_DISTRIBUTION_UNIFORM = 0,
+	SPREAD_DISTRIBUTION_NORMAL
+} spread_distribution_type_t;
+
 typedef enum tree_service_cycle_method {
 	TREE_SERVICE_CYCLE_RANDOM = 0,
 	TREE_SERVICE_CYCLE_CALC
@@ -71,7 +76,9 @@ typedef struct topology_spec
 
     model_type_t model_type;
     struct {
-    	step_num max_spread;
+    	spread_distribution_type_t spread_mode;
+    	step_num spread_avg;
+
         float offline_fail_rate; /* if >1 - absolute, if <1 - percentage of nodes */
         float online_fail_rate; /* if >1 - absolute, if <1 - rate out of total nodes */
     } model;

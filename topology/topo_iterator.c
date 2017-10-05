@@ -64,11 +64,13 @@ static step_num topology_choose_offset(topology_spec_t *spec)
 {
     if ((spec->model_type == COLLECTIVE_MODEL_SPREAD) ||
     	(spec->model_type == COLLECTIVE_MODEL_REAL)) {
-    	step_num a = gaussian_random(spec->model.max_spread, spec);
-    	// printf("gaussian_random(%lu)=%lu\n", spec->model.max_spread, a);
-    	return a;
+    	switch (spec->model.spread_mode){
+    	case SPREAD_DISTRIBUTION_UNIFORM:
+    		return CYCLIC_RANDOM(spec, 2 * spec->model.spread_avg);
+    	case SPREAD_DISTRIBUTION_NORMAL:
+    		return gaussian_random(spec->model.spread_avg / 10, spec);
+    	}
     }
-
     return 0;
 }
 

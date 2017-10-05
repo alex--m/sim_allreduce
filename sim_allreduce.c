@@ -151,19 +151,20 @@ int sim_test(sim_spec_t *spec)
                     spec->topology.model_type,
                     spec->topology.topology_type,
                     spec->topology.topology.tree.radix,
-                    spec->topology.model.max_spread,
+                    spec->topology.model.spread_avg,
 					spec->topology.model.offline_fail_rate,
 					spec->topology.model.online_fail_rate,
 					spec->steps.cnt ? spec->steps.sum / spec->steps.cnt : 0,
 					spec->in_spread.cnt ? spec->in_spread.sum / spec->in_spread.cnt : 0,
 					spec->queue.max);
         } else {
-            printf("%lu,%u,%u,%u,%lu,%.2f,%.2f,%u",
+            printf("%lu,%u,%u,%u,%u,%lu,%.2f,%.2f,%u",
                     spec->node_count,
                     spec->topology.model_type,
                     spec->topology.topology_type,
                     spec->topology.topology.tree.radix,
-                    spec->topology.model.max_spread,
+                    spec->topology.model.spread_mode,
+                    spec->topology.model.spread_avg,
 					spec->topology.model.offline_fail_rate,
 					spec->topology.model.online_fail_rate,
                     total_test_count);
@@ -266,19 +267,19 @@ int sim_coll_model_spread(sim_spec_t *spec)
     int ret_val = OK;
     unsigned index, base2;
 
-    if (spec->topology.model.max_spread != 0) {
+    if (spec->topology.model.spread_avg != 0) {
         return sim_coll_topology(spec);
     }
 
     /* Calculate the upper limit as closest power of 2 to the square root */
     for (base2 = 1; base2 * base2 < spec->node_count; base2 = base2 * 2);
 
-    for (index = 1; ((index <= base2) && (ret_val == OK)); index <<= 1) {
-        spec->topology.model.max_spread = index;
+    for (index = base2; ((index <= spec->node_count) && (ret_val == OK)); index <<= 1) {
+        spec->topology.model.spread_avg = index;
         ret_val = sim_coll_topology(spec);
     }
 
-    spec->topology.model.max_spread = 0;
+    spec->topology.model.spread_avg = 0;
     return ret_val;
 }
 
@@ -343,8 +344,8 @@ int sim_coll_model_vars(sim_spec_t *spec)
         return sim_coll_model_nodes_failing(spec);
 
     case COLLECTIVE_MODEL_REAL:
-    	if (spec->topology.model.max_spread == 0) {
-    		spec->topology.model.max_spread = sqrt(spec->node_count);
+    	if (spec->topology.model.spread_avg == 0) {
+    		spec->topology.model.spread_avg = sqrt(spec->node_count);
     	}
         return sim_coll_model_nodes_failing(spec);
 
@@ -384,30 +385,32 @@ const char HELP_STRING[] =
         "Collecive simulator, by Alex Margolin.\nOptional arguments:\n\n"
         "    -m|--model <collective-model>\n"
         "        0 - Iterative\n"
-        "        1 - Fixed distance\n"
-        "        2 - Random distance (uniform distribution)\n"
-        "        3 - Random time-offset (\"spread\", uniform distribution)\n"
-        "        4 - Missing nodes (\"inactive\", uniform distribution))\n"
-        "        5 - Failing nodes (\"online failure\", uniform distribution))\n"
-        "        6 - All of the above (default)\n\n"
+        "        1 - Random time-offset (process arrival time imbalance, AKA spread)\n"
+        "        2 - Missing nodes (\"inactive\", uniform distribution))\n"
+        "        3 - Failing nodes (\"online failure\", uniform distribution))\n"
+        "        4 - All of the above (default)\n\n"
         "    -t|--topology <collective-topology>\n"
-        "        0 - N-array tree\n"
+        "        0 - N-ary tree\n"
         "        1 - K-nomial tree\n"
-        "        2 - N-array tree, multi-root\n"
+        "        2 - N-ary tree, multi-root\n"
         "        3 - K-nomial tree, multi-root\n"
-        "        4 - Recursive K-ing\n"
-        "        5 - All of the above (default)\n\n"
+//        "        4 - Recursive K-ing\n"
+        "        4 - All of the above (default)\n\n"
         "    -i|--iterations <iter-count> - Test iteration count (default: 1)\n"
-        "    -p|--procs <proc-count> - Set Amount of processes to simulate (default: 20)\n"
+        "    -p|--procs <proc-count> - Set Amount of processes to simulate"
+        " (default: iterate from 2 to infinity in powers of 2)\n\n"
         "    -r|--radix <tree-radix> - Set tree radix for tree-based topologies"
-        " (default: iterate from 3 to 10)\n\n"
+        " (default: iterate from 3 to 20)\n\n"
         "    -c|--recovery <recovery-method> - Set the method for tree fault recovery:"
         "        0 - Fall back to fathers, up the tree\n"
         "        1 - Fall back to brothers, across the tree\n"
         "        2 - All of the above (default)\n\n"
+        "    -s|--spread-mode <recovery-method> - Set the method to generate random spread:"
+        "        0 - Uniform function (default)\n"
+        "        1 - Normal distribution\n\n"
+        "    -a|--spread-avg <iterations> - Set average spread between processes"
+		" (default: iterate from sqrt(procs) to procs in powers of 2)\n\n"
         "    -l|--latency <iterations> - Set the message delivery latency (default: 10)\n\n"
-        "    -s|--max-spread <iterations> - Set maximum spread between processes"
-        " (default: iterate from 0 to procs in powers of 2)\n\n"
         "";
 
 int sim_coll_parse_args(int argc, char **argv, sim_spec_t *spec)
@@ -425,12 +428,13 @@ int sim_coll_parse_args(int argc, char **argv, sim_spec_t *spec)
                 {"fail-rate",      required_argument, 0, 'f' },
 				{"online-fails",   required_argument, 0, 'o' },
                 {"latency",        required_argument, 0, 'l' },
-                {"max-spread",     required_argument, 0, 's' },
+                {"spread-mode",    required_argument, 0, 's' },
+                {"spread-avg",     required_argument, 0, 'a' },
                 {"iterations",     required_argument, 0, 'i' },
                 {0,                0,                 0,  0  },
         };
 
-        c = getopt_long(argc, argv, "hvm:t:p:r:c:f:o:l:s:i:",
+        c = getopt_long(argc, argv, "hvm:t:p:r:c:f:o:l:s:a:i:",
                 long_options, &option_index);
         if (c == -1)
             break;
@@ -472,7 +476,11 @@ int sim_coll_parse_args(int argc, char **argv, sim_spec_t *spec)
             break;
 
         case 's':
-            spec->topology.model.max_spread = atoi(optarg);
+            spec->topology.model.spread_mode = atoi(optarg);
+            break;
+
+        case 'a':
+            spec->topology.model.spread_avg = atoi(optarg);
             break;
 
         case 'f':
@@ -556,7 +564,7 @@ int main(int argc, char **argv)
 					spec.topology.random_seed);
     	} else {
     		/* CSV header */
-    		printf("np,model,topo,radix,max_offset,off-fail,on-fail,runs,"
+    		printf("np,model,topo,radix,spread_mode,spread_avg,off-fail,on-fail,runs,"
     				"min_steps,max_steps,steps_avg,min_in_spread,max_in_spread,in_spread_avg,min_out_spread,max_out_spread,out_spread_avg,"
     				"min_msgs,max_msgs,msgs_avg,min_data,max_data,data_avg,min_queue,max_queue,queue_avg,"
     				"min_dead,max_dead,dead_avg\n");
