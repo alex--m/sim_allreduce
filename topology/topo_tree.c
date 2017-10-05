@@ -903,7 +903,7 @@ int tree_build(topology_spec_t *spec, comm_graph_t **graph)
     next_child = first_child;
     while (next_child < node_count) {
         (*graph)->max_depth++;
-        for (child_count = 0; child_count < tree_radix; child_count++) {
+        for (child_count = 0; child_count < tree_radix - is_knomial; child_count++) {
             for (next_father = first_father;
                  (next_father < first_child) && (next_child < node_count);
                  next_father++, next_child++) {
@@ -915,7 +915,7 @@ int tree_build(topology_spec_t *spec, comm_graph_t **graph)
             }
         }
 
-        first_child += (first_child - first_father) * tree_radix;
+        first_child += (first_child - first_father) * (tree_radix - is_knomial);
         if (!is_knomial) {
             first_father = next_father;
         }
