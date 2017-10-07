@@ -180,6 +180,7 @@ int tree_start(topology_spec_t *spec, comm_graph_t *graph, tree_context_t *ctx)
     ctx->bitfield_size = spec->bitfield_size;
     ctx->radix = spec->topology.tree.radix;
     ctx->graph = graph;
+    ctx->service_method = spec->model.service_mode;
 
     ctx->contacts_used =
             my_node->directions[COMM_GRAPH_FATHERS]->node_count +
@@ -244,9 +245,9 @@ static void tree_validate(tree_context_t *ctx)
 
 static tree_distance_t tree_pick_service_distance(tree_context_t *ctx)
 {
-    step_num step_index, each_cycle, factor;
+    step_num step, cycle;
     tree_distance_t distance;
-    float tester, rand;
+    float tester, rand, ifactor;
 
     switch (ctx->service_method) {
     case TREE_SERVICE_CYCLE_RANDOM:
@@ -269,10 +270,26 @@ static tree_distance_t tree_pick_service_distance(tree_context_t *ctx)
          * The service-distance-allocation array is expanded, so that the
          * iterator can reach even that receive a fraction of a slot.
          */
-        step_index = *ctx->step_index;
-        each_cycle = TREE_SERVICE_CYCLE_LENGTH(ctx->graph, ctx->my_node);
-        factor = 1 + (step_index / each_cycle);
-        distance = (step_index * factor) / (each_cycle * factor);
+        step = *ctx->step_index;
+        cycle = TREE_SERVICE_CYCLE_LENGTH(ctx->graph, ctx->my_node);
+
+#define COMMON_HELPER(x,r,T) (ceil(log(1 - (((x) % (T))/(T)))/log(r)))
+#define MI_INDEX(x,r,T)      ((unsigned)floor(log(1 + ((x)/(T)))/log(1/(r))))
+#define MI_WIDTH(x,r,T)      (pow((r),-1.0*(MI_INDEX((x),(r),(T)))))
+#define MI_OFFSET(x,r,T)     ((unsigned)floor(((x)%((T)*(unsigned)MI_WIDTH((x),(r),(T))))/(T)))
+#define MI_HELPER(x,r,T)     (COMMON_HELPER((T)-1,(r),(T)) + \
+		                      COMMON_HELPER(MI_OFFSET((x),(r),(T)),(r),(unsigned)MI_WIDTH((x),(r),(T))))
+
+        ifactor = 1/TREE_NEPOTISM_FACTOR;
+        if (step % cycle == 0) {
+        	if (MI_OFFSET(step, ifactor, cycle) == 0) {
+        		distance = MI_HELPER(step, ifactor, cycle);
+        	} else {
+        		distance = MI_HELPER(step + cycle, ifactor, cycle);
+        	}
+        } else {
+        	distance = COMMON_HELPER(step, ifactor, cycle);
+        }
         break;
 
     default:

@@ -76,6 +76,7 @@ typedef struct topology_spec
 
     model_type_t model_type;
     struct {
+    	tree_service_cycle_method_t service_mode;
     	spread_distribution_type_t spread_mode;
     	step_num spread_avg;
 

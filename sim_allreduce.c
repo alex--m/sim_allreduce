@@ -428,13 +428,14 @@ int sim_coll_parse_args(int argc, char **argv, sim_spec_t *spec)
                 {"fail-rate",      required_argument, 0, 'f' },
 				{"online-fails",   required_argument, 0, 'o' },
                 {"latency",        required_argument, 0, 'l' },
+				{"service-mode",   required_argument, 0, 'q' },
                 {"spread-mode",    required_argument, 0, 's' },
                 {"spread-avg",     required_argument, 0, 'a' },
                 {"iterations",     required_argument, 0, 'i' },
                 {0,                0,                 0,  0  },
         };
 
-        c = getopt_long(argc, argv, "hvm:t:p:r:c:f:o:l:s:a:i:",
+        c = getopt_long(argc, argv, "hvm:t:p:r:c:f:o:l:s:a:i:q:",
                 long_options, &option_index);
         if (c == -1)
             break;
@@ -473,6 +474,10 @@ int sim_coll_parse_args(int argc, char **argv, sim_spec_t *spec)
 
         case 'l':
             spec->topology.latency = atoi(optarg);
+            break;
+
+        case 'q':
+            spec->topology.model.service_mode = atoi(optarg);
             break;
 
         case 's':
