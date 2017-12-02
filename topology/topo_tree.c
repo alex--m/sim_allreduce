@@ -453,7 +453,8 @@ static inline int tree_next_by_topology(tree_context_t *ctx,
     }
 
     /* No more packets to send - we're done here! (unless it's the master) */
-    result->dst = DESTINATION_IDLE;
+    result->dst      = DESTINATION_IDLE;
+    result->distance = DISTANCE_NO_PACKET;
     return (ctx->my_node != 0) ? DONE : OK;
 }
 
@@ -781,7 +782,7 @@ int tree_fix(comm_graph_t *graph, tree_context_t *ctx,
     				new.timeout          = 0;
     				new.bitfield         = BITFIELD_IGNORE_DATA;
     				contact->his_timeout = TIMEOUT_NEVER;
-    				ret                  = global_enqueue(&new, source_queue);
+    				ret                  = global_enqueue(&new, source_queue, ctx->bitfield_size);
     				if (ret != OK) {
     					return ret;
     				}
@@ -793,7 +794,9 @@ int tree_fix(comm_graph_t *graph, tree_context_t *ctx,
     /* Calculate route (in nodes) from myself to the dead node */
     kill_route = alloca(sizeof(node_id) * graph->max_depth);
     if (me < source) {
-    	for (idx = source; ((idx != me) && (idx != 0)); idx = graph->nodes[idx].directions[COMM_GRAPH_FATHERS]->nodes[0]) {
+    	for (idx = source; ((idx != me) && (idx != 0));
+    		 idx = (graph->nodes[idx].directions[COMM_GRAPH_FATHERS]->node_count > 1) ?
+    				 0 : graph->nodes[idx].directions[COMM_GRAPH_FATHERS]->nodes[0]) {
     		assert(jdx < graph->max_depth);
     		kill_route[jdx++] = idx;
     		if ((!source_is_dead) && (idx == source)) {
@@ -809,7 +812,9 @@ int tree_fix(comm_graph_t *graph, tree_context_t *ctx,
     	}
     	is_father_dead = 0; /* Children are adopted */
     } else {
-    	for (idx = me; (idx != source) && (idx != 0); idx = graph->nodes[idx].directions[COMM_GRAPH_FATHERS]->nodes[0]) {
+    	for (idx = me; (idx != source) && (idx != 0);
+    		 idx = (graph->nodes[idx].directions[COMM_GRAPH_FATHERS]->node_count > 1) ?
+    				 0 : graph->nodes[idx].directions[COMM_GRAPH_FATHERS]->nodes[0]) {
     		assert(jdx < graph->max_depth);
     		kill_route[jdx++] = idx;
     		if (idx == me) {

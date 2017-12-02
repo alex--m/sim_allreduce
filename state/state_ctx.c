@@ -171,7 +171,7 @@ static inline int state_enqueue(state_t *state, send_item_t *sent, send_list_t *
     	}
     }
 
-    assert(POPCOUNT_HERE(sent->bitfield, state->spec->node_count));
+    assert((sent->bitfield == NULL) || (POPCOUNT_HERE(sent->bitfield, state->spec->node_count)));
 
     /* make sure chuck has free slots */
     slot_size = CTX_BITFIELD_SIZE(state);
@@ -230,7 +230,12 @@ static inline int state_enqueue(state_t *state, send_item_t *sent, send_list_t *
     /* fill the slot with the packet to be sent later */
     item = &list->items[slot_idx];
     memcpy(item, sent, offsetof(send_item_t, bitfield));
-    memcpy(item->bitfield, sent->bitfield, slot_size);
+    if (sent->bitfield == BITFIELD_IGNORE_DATA) {
+    	memset(item->bitfield, 0, slot_size);
+    	SET_BIT_HERE(item->bitfield, sent->src);
+    } else {
+    	memcpy(item->bitfield, sent->bitfield, slot_size);
+    }
     if (list->max < ++list->used) {
     	list->max = list->used;
     }
@@ -238,8 +243,10 @@ static inline int state_enqueue(state_t *state, send_item_t *sent, send_list_t *
     return OK;
 }
 
-int global_enqueue(send_item_t *sent, send_list_t *queue) {
-	return state_enqueue(NULL, sent, queue);
+int global_enqueue(send_item_t *sent, send_list_t *queue, unsigned bitfield_size) {
+	state_t hack_state = {0};
+	hack_state.bitfield_size = bitfield_size;
+	return state_enqueue(&hack_state, sent, queue);
 }
 
 static inline int state_process(state_t *state, send_item_t *incoming)
@@ -333,7 +340,7 @@ int state_next_step(state_t *state)
             res.distance = DISTANCE_NO_PACKET;
             res.dst = DESTINATION_DEAD;
             dead_count++;
-        } else if ((iterator->finish) && (idx != 0)) {
+        } else if ((iterator->finish) && (idx != 0) && (iterator->in_queue.used == 0)) {
         	/* Already complete (for this node) */
             active_count--;
         	ret_val = DONE;
@@ -345,8 +352,6 @@ int state_next_step(state_t *state)
                 if (ret_val == DONE) {
                     if (iterator->finish == 0) {
                     	iterator->finish = state->spec->step_index;
-                    } else {
-                    	assert(idx == 0);
                     }
                     active_count--;
                     ret_val = OK;
@@ -397,6 +402,7 @@ int state_next_step(state_t *state)
             			printf(" - accepts from #%lu (type=%lu)", res.src, res.msg);
             		}
             	} else {
+            		assert(res.dst < state->spec->node_count);
             		printf(" - sends to #%lu (msg=%lu)", res.dst, res.msg);
             	}
             } else if (res.dst == DESTINATION_UNKNOWN) {

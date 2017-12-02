@@ -24,6 +24,9 @@
 #define _SET_BIT(bitfield, offset) \
 	*(bitfield + (((offset) + 1) >> 3)) |= (1 << (((offset) + 1) & 7))
 
+#define SET_BIT_HERE(bitfield, offset) \
+	_SET_BIT(bitfield, offset)
+
 #define SET_OLD_BIT(ctx, local_node, node_bit) \
     _SET_BIT(GET_OLD_BITFIELD(ctx, local_node), node_bit)
 

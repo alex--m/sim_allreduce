@@ -114,7 +114,7 @@ typedef struct send_list {
 } send_list_t;
 
 /* To be called from wthin individual topologies */
-int global_enqueue(send_item_t *sent, send_list_t *queue);
+int global_enqueue(send_item_t *sent, send_list_t *queue, unsigned bitfield_size);
 
 typedef struct topology_iterator {
     comm_graph_t *graph;        /* Pointer to the graph - changes upon node failures */
