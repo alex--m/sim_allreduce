@@ -1,3 +1,4 @@
+
 #include <math.h>
 #include <stdio.h>
 #include <assert.h>
@@ -179,7 +180,7 @@ static inline int state_enqueue(state_t *state, send_item_t *sent, send_list_t *
 
         /* extend chuck */
         if (list->allocated == 0) {
-            list->allocated = 2 * state->spec->node_count;
+            list->allocated = state->spec->node_count;
         } else {
             list->allocated *= 2;
         }
@@ -187,6 +188,8 @@ static inline int state_enqueue(state_t *state, send_item_t *sent, send_list_t *
         list->items = realloc(list->items,
                 list->allocated * (sizeof(send_item_t) + slot_size));
         if (!list->items) {
+            perror("Failed to (re)allocate queue");
+            printf("Failed to allocate %u items of size %u\n", list->allocated, slot_size);
             return ERROR;
         }
 
