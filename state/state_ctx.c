@@ -53,26 +53,16 @@ int state_create(topology_spec_t *spec, state_t *old_state, state_t **new_state)
         spec->bitfield_size = CTX_BITFIELD_SIZE(ctx) =
         		CALC_BITFIELD_SIZE(spec->node_count);
 
-        ctx->new_matrix = calloc(1, CTX_MATRIX_SIZE(ctx));
+        ctx->new_matrix = calloc(1, (2 * CTX_MATRIX_SIZE(ctx)) +
+        		(spec->node_count * ctx->per_proc_size));
         if (ctx->new_matrix == NULL)
         {
-            state_destroy(ctx);
+            free(ctx);
             return ERROR;
         }
 
-        ctx->old_matrix = calloc(1, CTX_MATRIX_SIZE(ctx));
-        if (ctx->old_matrix == NULL)
-        {
-            state_destroy(ctx);
-            return ERROR;
-        }
-
-        ctx->procs = malloc(spec->node_count * ctx->per_proc_size);
-        if (ctx->procs == NULL)
-        {
-            state_destroy(ctx);
-            return ERROR;
-        }
+        ctx->old_matrix = ctx->new_matrix + CTX_MATRIX_SIZE(ctx);
+        ctx->procs = (topology_iterator_t*)(ctx->old_matrix + CTX_MATRIX_SIZE(ctx));
     }
 
     /* Select and copy the function pointers for the requested topology */
@@ -195,18 +185,13 @@ static inline int state_enqueue(state_t *state, send_item_t *sent, send_list_t *
         }
 
         list->items = realloc(list->items,
-                list->allocated * sizeof(send_item_t));
+                list->allocated * (sizeof(send_item_t) + slot_size));
         if (!list->items) {
             return ERROR;
         }
 
-        list->data = realloc(list->data,
-                list->allocated * slot_size);
-        if (!list->data) {
-            return ERROR;
-        }
-
         /* Reset bitfield pointers to data */
+        list->data = (unsigned char*)(list->items + list->allocated);
 		for (slot_idx = 0; slot_idx < list->used; slot_idx++) {
 			list->items[slot_idx].bitfield =
 					list->data + (slot_idx * slot_size);
@@ -479,17 +464,12 @@ void state_destroy(state_t *ctx)
         for (i = 0; i < ctx->spec->node_count; i++) {
             topology_iterator_destroy(GET_ITERATOR(ctx, i), ctx->funcs);
         }
-        free(ctx->procs);
     }
 
     if (ctx->outq.allocated) {
         free(ctx->outq.items);
-        free(ctx->outq.data);
         ctx->outq.allocated = 0;
         ctx->outq.used = 0;
-    }
-    if (ctx->old_matrix) {
-        free(ctx->old_matrix);
     }
     if (ctx->new_matrix) {
         free(ctx->new_matrix);
