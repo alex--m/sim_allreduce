@@ -178,7 +178,6 @@ void topology_iterator_destroy(topology_iterator_t *iterator, topo_funcs_t *func
     if (iterator->in_queue.allocated) {
         free(iterator->in_queue.items);
         iterator->in_queue.items = NULL;
-        free(iterator->in_queue.data);
         iterator->in_queue.data = NULL;
         iterator->in_queue.allocated = 0;
     }

@@ -79,15 +79,17 @@
     if (IS_FULL_HERE(addition)) {                                             \
         SET_FULL(ctx, local_node);                                            \
     } else if (!IS_FULL(ctx, local_node)) {                                   \
-        unsigned i, out_cnt;                                                  \
+        unsigned i, in_cnt = 0, out_cnt;                                      \
         unsigned *added = (unsigned*)addition;                                \
     	unsigned *present = (unsigned*)GET_NEW_BITFIELD(ctx, local_node);     \
         unsigned max = CTX_BITFIELD_SIZE(ctx) / sizeof(unsigned);             \
         for (i = 0, out_cnt = 0; i < max; i++, added++, present++)            \
         {                                                                     \
+            in_cnt += __builtin_popcount(*added);                             \
             *present |= *added;                                               \
             out_cnt += __builtin_popcount(*present);                          \
         }                                                                     \
+		if (in_cnt == 0) return ERROR;                                        \
 		if (out_cnt == ctx->spec->node_count) SET_FULL(ctx, local_node);      \
     }                                                                         \
 })

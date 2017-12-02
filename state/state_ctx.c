@@ -37,8 +37,7 @@ int state_create(topology_spec_t *spec, state_t *old_state, state_t **new_state)
         for (index = 0; index < ctx->outq.allocated; index++) {
         	ctx->outq.items[index].distance = DISTANCE_VACANT;
         }
-        memset(ctx->new_matrix, 0, CTX_MATRIX_SIZE(ctx));
-        memset(ctx->old_matrix, 0, CTX_MATRIX_SIZE(ctx));
+        memset(ctx->new_matrix, 0, 2*CTX_MATRIX_SIZE(ctx));
         memset(&ctx->stats, 0, sizeof(ctx->stats));
         for (index = 0; index < spec->node_count; index++) {
             topology_iterator_destroy(GET_ITERATOR(ctx, index), ctx->funcs);
@@ -53,7 +52,6 @@ int state_create(topology_spec_t *spec, state_t *old_state, state_t **new_state)
         ctx->per_proc_size = topology_iterator_size();
         spec->bitfield_size = CTX_BITFIELD_SIZE(ctx) =
         		CALC_BITFIELD_SIZE(spec->node_count);
-
         ctx->new_matrix = calloc(1, (2 * CTX_MATRIX_SIZE(ctx)) +
         		(spec->node_count * ctx->per_proc_size));
         if (ctx->new_matrix == NULL)
@@ -140,6 +138,7 @@ static inline int state_enqueue(state_t *state, send_item_t *sent, send_list_t *
 {
     unsigned slot_idx = 0, slot_size;
     send_item_t *item;
+    unsigned char *data;
 
     if (sent == NULL) {
     	/* Enqueue all items from list into the global list */
@@ -172,12 +171,11 @@ static inline int state_enqueue(state_t *state, send_item_t *sent, send_list_t *
     	}
     }
 
+    assert(POPCOUNT_HERE(sent->bitfield, state->spec->node_count));
+
     /* make sure chuck has free slots */
-
-    slot_size = state ? CTX_BITFIELD_SIZE(state) : 0;
+    slot_size = CTX_BITFIELD_SIZE(state);
     if (list->allocated == list->used) {
-    	assert(state != 0); /* Hack: no way to get slot_size unless state is given... */
-
         /* extend chuck */
         if (list->allocated == 0) {
             list->allocated = state->spec->node_count;
@@ -193,18 +191,20 @@ static inline int state_enqueue(state_t *state, send_item_t *sent, send_list_t *
             return ERROR;
         }
 
-        /* Reset bitfield pointers to data */
+        /* Copy old entries to new location */
         list->data = (unsigned char*)(list->items + list->allocated);
-		for (slot_idx = 0; slot_idx < list->used; slot_idx++) {
-			list->items[slot_idx].bitfield =
-					list->data + (slot_idx * slot_size);
+        memmove(list->data, list->items + list->used, list->used * slot_size);
+
+        /* Reset bitfield pointers to data */
+		for (slot_idx = 0, item = list->items, data = list->data;
+		     slot_idx < list->used; slot_idx++, item++, data += slot_size) {
+			item->bitfield = data;
 		}
 
         /* set new slots as vacant */
-        for (; slot_idx < list->allocated; slot_idx++) {
-            list->items[slot_idx].distance = DISTANCE_VACANT;
-            list->items[slot_idx].bitfield =
-                    list->data + (slot_idx * slot_size);
+        for (; slot_idx < list->allocated; slot_idx++, item++, data += slot_size) {
+            item->distance = DISTANCE_VACANT;
+            item->bitfield = data;
         }
 
         /* Go to the first newly added slot */
@@ -286,11 +286,11 @@ static inline int state_dequeue(state_t *state)
     send_list_t *outq = &state->outq;
     unsigned slot_idx, used = outq->used;
 
-    for (slot_idx = 0, item = &outq->items[0];
+    for (slot_idx = 0, item = outq->items;
          (used > 0) && (slot_idx < outq->allocated) && (ret_val == OK);
          slot_idx++, item++) {
         if (item->distance != DISTANCE_VACANT) {
-            if (--item->distance == DISTANCE_VACANT) {
+            if (--(item->distance) == DISTANCE_VACANT) {
                 ret_val = state_process(state, item);
                 if (ret_val != OK) {
                 	return ret_val;
