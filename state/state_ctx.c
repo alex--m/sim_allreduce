@@ -171,8 +171,6 @@ static inline int state_enqueue(state_t *state, send_item_t *sent, send_list_t *
     	}
     }
 
-    assert((sent->bitfield == NULL) || (POPCOUNT_HERE(sent->bitfield, state->spec->node_count)));
-
     /* make sure chuck has free slots */
     slot_size = CTX_BITFIELD_SIZE(state);
     if (list->allocated == list->used) {
@@ -271,10 +269,13 @@ static inline int state_process(state_t *state, send_item_t *incoming)
         /* Packet destination is dead - Wait until the timeout to pronounce death */
     	send_item_t death;
     	assert(incoming->timeout);
-    	memcpy(&death, incoming, sizeof(send_item_t));
-    	death.distance = death.timeout - state->spec->step_index;
+    	death.dst      = incoming->src;
+    	death.src      = incoming->dst;
     	death.msg      = MSG_DEATH;
+    	printf("Sending DEATH within %i steps!\n", death.timeout - state->spec->step_index);
+    	death.distance = death.timeout - state->spec->step_index;
     	death.timeout  = 0;
+    	death.bitfield = BITFIELD_IGNORE_DATA;
     	ret_val        = state_enqueue(state, &death, NULL);
     } else {
     	/* Packet destination is alive */
@@ -340,10 +341,6 @@ int state_next_step(state_t *state)
             res.distance = DISTANCE_NO_PACKET;
             res.dst = DESTINATION_DEAD;
             dead_count++;
-        } else if ((iterator->finish) && (idx != 0) && (iterator->in_queue.used == 0)) {
-        	/* Already complete (for this node) */
-            active_count--;
-        	ret_val = DONE;
         } else {
             /* Get next the target rank of the next send */
         	res.src = idx; /* Also used for "protecting" #0 from death */
@@ -414,7 +411,7 @@ int state_next_step(state_t *state)
             } else if (res.dst == DESTINATION_IDLE) {
                 printf(" - IDLE!");
             } else {
-                printf(" - waits for #%lu", res.dst);
+                printf(" - waits for #%lu (timeout=%lu)", res.dst, res.timeout);
             }
         }
     }

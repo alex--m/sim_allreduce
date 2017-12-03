@@ -298,7 +298,6 @@ int sim_coll_model_nodes_missing(sim_spec_t *spec)
 		  (ret_val == OK));
          index *= 10) {
         spec->topology.model.offline_fail_rate = index;
-    	printf("offline_fail_rate = %f\n", spec->topology.model.offline_fail_rate);
         ret_val = sim_coll_topology(spec);
     }
 

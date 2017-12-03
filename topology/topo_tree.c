@@ -384,7 +384,12 @@ static inline int tree_next_by_topology(tree_context_t *ctx,
                     	ctx->next_send_index = send_index;
                     	ctx->next_wait_index = wait_index;
                     	ctx->order_indicator = order_idx;
-                    	result->dst          = next_peer; // For verbose mode
+
+                    	/* Store for verbose mode */
+                    	result->dst          = next_peer;
+                        current_step_index   = *ctx->step_index;
+                    	result->timeout      = (contact->timeout != TIMEOUT_NEVER) ?
+                    			contact->timeout : (contact->between_kas - current_step_index + contact->timeout_sent);
                     	return OK;
                     }
                 }
