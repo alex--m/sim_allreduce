@@ -124,9 +124,13 @@ int topology_iterator_create(topology_spec_t *spec,
     return ret_val;
 }
 
-int topology_iterator_next(topology_spec_t *spec, topo_funcs_t *funcs,
-                           topology_iterator_t *iterator, send_item_t *result)
+int topology_iterator_next(topology_spec_t *spec,
+                           topo_funcs_t *funcs,
+                           topology_iterator_t *iterator,
+						   send_list_t *global_queue,
+						   send_item_t *result)
 {
+	int idx, ret;
 	step_num now = spec->step_index;
 	comm_graph_t *graph = iterator->graph;
     result->distance = DISTANCE_SEND_NOW + spec->latency;
@@ -134,6 +138,23 @@ int topology_iterator_next(topology_spec_t *spec, topo_funcs_t *funcs,
     /* Check if time to die */
     if (now == iterator->death_offset) {
     	SET_DEAD(iterator);
+
+    	/* kill all messages waiting on his queue */
+    	result->msg      = MSG_DEATH;
+    	result->timeout  = 0;
+    	result->bitfield = BITFIELD_IGNORE_DATA;
+    	for (idx = 0; idx < iterator->in_queue.allocated; idx++) {
+    		send_item_t *stale = &iterator->in_queue.items[idx];
+    		if (stale->distance != DISTANCE_VACANT) {
+    			result->dst      = stale->src;
+    			result->src      = stale->dst;
+    			result->distance = stale->timeout - spec->step_index;
+    			ret              = global_enqueue(result, global_queue, spec->bitfield_size);
+    			if (ret != OK) {
+    				return ret;
+    			}
+    		}
+    	}
     }
 
     /* Check if already dead */
@@ -169,8 +190,7 @@ int topology_iterator_omit(topology_iterator_t *iterator,
         iterator->graph = comm_graph_clone(current_topology);
     }
 
-    return funcs->fix_f(iterator->graph, iterator->ctx, method, source_iterator->ctx,
-    		&source_iterator->in_queue, source_is_dead);
+    return funcs->fix_f(iterator->graph, iterator->ctx, method, source_iterator->ctx, source_is_dead);
 }
 
 void topology_iterator_destroy(topology_iterator_t *iterator, topo_funcs_t *funcs)

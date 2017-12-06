@@ -100,6 +100,7 @@ typedef struct send_item {
 #define           DISTANCE_SEND_NOW    (1)
     step_num      timeout;   /* packet timeout (after which consider peer dead),
                                 after subtracting the initial send distance */
+#define TIMEOUT_NEVER ((step_num)-1) /* Packet does not expect a response (protocol-specific) */
     unsigned char *bitfield; /* pointer to the packet data - MUST BE LAST MEMBER */
 #define           BITFIELD_IGNORE_DATA (NULL)
 } send_item_t;
@@ -144,8 +145,8 @@ typedef struct topo_funcs
     int    (*next_f)(comm_graph_t *graph, send_list_t *in_queue,
                      void *internal_ctx, send_item_t *result);
     int    (*fix_f)(comm_graph_t *graph, void *internal_ctx,
-                    tree_recovery_method_t method, void *source_ctx,
-					send_list_t *source_queue, int source_is_dead);
+                    tree_recovery_method_t method,
+					void *source_internal_ctx, int source_is_dead);
     void   (*stop_f)(void *internal_ctx);
 } topo_funcs_t;
 
@@ -158,8 +159,11 @@ int topology_iterator_create(topology_spec_t *spec,
                              topo_funcs_t *funcs,
                              topology_iterator_t *iterator);
 
-int topology_iterator_next(topology_spec_t *spec, topo_funcs_t *funcs,
-                           topology_iterator_t *iterator, send_item_t *result);
+int topology_iterator_next(topology_spec_t *spec,
+                           topo_funcs_t *funcs,
+                           topology_iterator_t *iterator,
+						   send_list_t *global_queue,
+						   send_item_t *result);
 
 int topology_iterator_omit(topology_iterator_t *iterator,
 						   topo_funcs_t *funcs,

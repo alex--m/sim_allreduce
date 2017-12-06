@@ -7,7 +7,7 @@ int tree_next(comm_graph_t *graph, send_list_t *in_queue,
               void *internal_ctx, send_item_t *result);
 int tree_fix(comm_graph_t *graph, void *internal_ctx,
              tree_recovery_method_t recovery, void *source_ctx,
-			 send_list_t *source_queue, int source_is_dead);
+			 void *source_internal_ctx, int source_is_dead);
 void tree_stop(void *internal_ctx);
 
 size_t butterfly_ctx_size();
@@ -17,7 +17,7 @@ int butterfly_next(comm_graph_t *graph, send_list_t *in_queue,
                    void *internal_ctx, send_item_t *result);
 int butterfly_fix(comm_graph_t *graph, void *internal_ctx,
 		          tree_recovery_method_t recovery, void *source_ctx,
-				  send_list_t *source_queue, int source_is_dead);
+				  void *source_internal_ctx, int source_is_dead);
 void butterfly_stop(void *internal_ctx);
 
 topo_funcs_t topo_map[] = {

@@ -23,7 +23,6 @@ typedef struct tree_contact {
     step_num last_seen;       /* Last time he sent me anything */
     step_num timeout_sent;    /* Last time I sent him anything */
     step_num timeout;         /* How long until I consider him dead */
-#define TIMEOUT_NEVER ((step_num)-1)
     step_num his_timeout;     /* How long until he considers me dead (resets to NEVER) */
     step_num pkt_timeout;     /* Timeout on packets sent to it */
     step_num between_kas;     /* interval between consecutive keepalive messages */
@@ -31,7 +30,6 @@ typedef struct tree_contact {
 
 typedef struct tree_context {
     unsigned char *my_bitfield;
-    size_t bitfield_size;
     node_id node_count;
     comm_graph_t *graph;
 
@@ -177,7 +175,6 @@ int tree_start(topology_spec_t *spec, comm_graph_t *graph, tree_context_t *ctx)
     ctx->random_seed = spec->random_seed;
     ctx->my_bitfield = spec->my_bitfield;
     ctx->node_count = spec->node_count;
-    ctx->bitfield_size = spec->bitfield_size;
     ctx->radix = spec->topology.tree.radix;
     ctx->graph = graph;
     ctx->service_method = spec->model.service_mode;
@@ -385,7 +382,8 @@ static inline int tree_next_by_topology(tree_context_t *ctx,
                     	ctx->next_wait_index = wait_index;
                     	ctx->order_indicator = order_idx;
 
-                    	/* Store for verbose mode */
+                    	/* Peer missing - document for verbose mode */
+                        result->distance     = DISTANCE_NO_PACKET;
                     	result->dst          = next_peer;
                         current_step_index   = *ctx->step_index;
                     	result->timeout      = (contact->timeout != TIMEOUT_NEVER) ?
@@ -451,6 +449,7 @@ static inline int tree_next_by_topology(tree_context_t *ctx,
             	ctx->next_wait_index = wait_index;
             	ctx->order_indicator = order_idx;
                 result->dst          = DESTINATION_UNKNOWN; // For verbose mode
+                result->distance     = DISTANCE_NO_PACKET;
                 return OK;
             }
             break;
@@ -490,7 +489,7 @@ static inline int tree_handle_incoming_packet(tree_context_t *ctx,
     	contact->his_timeout = TIMEOUT_NEVER;
     } else if (
     	((contact->his_timeout == TIMEOUT_NEVER) ||
-    	 (contact->his_timeout < incoming->timeout))) {
+    	 (contact->his_timeout > incoming->timeout))) {
     	contact->his_timeout = incoming->timeout;
     } /* Otherwise old KA packets would decrease the timeout, which is not true for the peer */
 
@@ -593,6 +592,7 @@ send_keepalive:
 	contact->timeout     = timeout;
 	contact->his_timeout = TIMEOUT_NEVER;
 	result->dst          = contact->node;
+	result->distance     = contact->distance;
 	result->timeout      = timeout;
 	return TREE_PACKET_CHOSEN;
 }
@@ -759,8 +759,8 @@ int tree_fix_peer(tree_context_t *ctx, tree_recovery_method_t recovery, node_id 
 
 
 int tree_fix(comm_graph_t *graph, tree_context_t *ctx,
-             tree_recovery_method_t recovery, tree_context_t *source_ctx,
-			 send_list_t *source_queue, int source_is_dead)
+             tree_recovery_method_t recovery,
+			 tree_context_t *source_ctx, int source_is_dead)
 {
     node_id idx, jdx = 0, tmp, me = ctx->my_node, source = source_ctx->my_node;
     int is_father_dead, ret;
@@ -770,31 +770,6 @@ int tree_fix(comm_graph_t *graph, tree_context_t *ctx,
 
     /* Update my pointer to the cloned graph */
     ctx->graph = graph;
-
-    /* kill all contacts that are waiting... */
-    if (source_is_dead) {
-    	tree_contact_t *contact;
-    	for (idx = 0; idx < source_ctx->contacts_used; idx++) {
-    		contact = &source_ctx->contacts[idx];
-    		int considered_dead = (contact->distance == DISTANCE_VACANT);
-    		if (!considered_dead) {
-    			if (contact->his_timeout != TIMEOUT_NEVER) {
-    				send_item_t new;
-    				new.dst              = source;
-    				new.src              = contact->node;
-    				new.msg              = MSG_DEATH;
-    				new.distance         = contact->his_timeout;
-    				new.timeout          = 0;
-    				new.bitfield         = BITFIELD_IGNORE_DATA;
-    				contact->his_timeout = TIMEOUT_NEVER;
-    				ret                  = global_enqueue(&new, source_queue, ctx->bitfield_size);
-    				if (ret != OK) {
-    					return ret;
-    				}
-    			}
-    		}
-    	}
-    }
 
     /* Calculate route (in nodes) from myself to the dead node */
     kill_route = alloca(sizeof(node_id) * graph->max_depth);

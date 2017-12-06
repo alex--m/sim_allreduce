@@ -253,30 +253,30 @@ static inline int state_process(state_t *state, send_item_t *incoming)
     topology_iterator_t *destination = GET_ITERATOR(state, incoming->dst);
 
     if (incoming->msg == MSG_DEATH) {
-    	assert(IS_DEAD(GET_ITERATOR(state, incoming->dst)));
+    	assert(IS_DEAD(GET_ITERATOR(state, incoming->src)));
     	assert(state->spec->model_type > COLLECTIVE_MODEL_SPREAD);
-    	SET_NEW_BIT(state, incoming->src, incoming->dst);
-    	if (POPCOUNT(state, incoming->src) == state->spec->node_count) {
-    		SET_FULL(state, incoming->src);
+    	SET_NEW_BIT(state, incoming->dst, incoming->src);
+    	if (POPCOUNT(state, incoming->dst) == state->spec->node_count) {
+    		SET_FULL(state, incoming->dst);
     	}
 
-    	return topology_iterator_omit(GET_ITERATOR(state, incoming->src),
+    	return topology_iterator_omit(destination,
     			state->funcs, state->spec->topology.tree.recovery,
-				GET_ITERATOR(state, incoming->dst), 1);
+				GET_ITERATOR(state, incoming->src), 1);
     }
 
     if (IS_DEAD(destination)) {
-        /* Packet destination is dead - Wait until the timeout to pronounce death */
-    	send_item_t death;
-    	assert(incoming->timeout);
-    	death.dst      = incoming->src;
-    	death.src      = incoming->dst;
-    	death.msg      = MSG_DEATH;
-    	printf("Sending DEATH within %i steps!\n", death.timeout - state->spec->step_index);
-    	death.distance = death.timeout - state->spec->step_index;
-    	death.timeout  = 0;
-    	death.bitfield = BITFIELD_IGNORE_DATA;
-    	ret_val        = state_enqueue(state, &death, NULL);
+    	if (incoming->timeout != TIMEOUT_NEVER) {
+    		/* Packet destination is dead - Wait until the timeout to pronounce death */
+    		send_item_t death;
+    		death.dst      = incoming->src;
+    		death.src      = incoming->dst;
+    		death.msg      = MSG_DEATH;
+    		death.distance = incoming->timeout - state->spec->step_index;
+    		death.timeout  = 0;
+    		death.bitfield = BITFIELD_IGNORE_DATA;
+    		ret_val        = state_enqueue(state, &death, NULL);
+    	}
     } else {
     	/* Packet destination is alive */
     	incoming->distance = DISTANCE_SEND_NOW;
@@ -344,7 +344,7 @@ int state_next_step(state_t *state)
         } else {
             /* Get next the target rank of the next send */
         	res.src = idx; /* Also used for "protecting" #0 from death */
-            ret_val = topology_iterator_next(spec, funcs, iterator, &res);
+            ret_val = topology_iterator_next(spec, funcs, iterator, &state->outq, &res);
             if (ret_val != OK) {
                 if (ret_val == DONE) {
                     if (iterator->finish == 0) {
