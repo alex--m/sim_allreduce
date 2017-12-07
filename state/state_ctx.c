@@ -175,12 +175,7 @@ static inline int state_enqueue(state_t *state, send_item_t *sent, send_list_t *
     slot_size = CTX_BITFIELD_SIZE(state);
     if (list->allocated == list->used) {
         /* extend chuck */
-        if (list->allocated == 0) {
-            list->allocated = state->spec->node_count;
-        } else {
-            list->allocated *= 2;
-        }
-
+        list->allocated += 100;
         list->items = realloc(list->items,
                 list->allocated * (sizeof(send_item_t) + slot_size));
         if (!list->items) {
