@@ -126,7 +126,7 @@ int sim_test(sim_spec_t *spec)
         	stats_calc(&spec->in_spread,  topology_max_offset);
         	stats_calc(&spec->out_spread, raw.last_step_counter - raw.first_step_counter);
         	stats_calc(&spec->data,       raw.data_len_counter);
-        	stats_calc(&spec->msgs,       raw.messages_counter);
+        	stats_calc(&spec->msgs,       raw.messages_counter / spec->node_count);
         	stats_calc(&spec->queue,      raw.max_queueu_len);
         	stats_calc(&spec->dead,       raw.death_toll);
         	topology_max_offset = 0;
