@@ -1,6 +1,7 @@
-#include "state/state.h"
 #include <mpi.h>
 #include <math.h>
+
+#include "state/state.h"
 
 #define PERROR printf
 
@@ -42,6 +43,7 @@ typedef struct sim_spec
 int sim_test_iteration(sim_spec_t *spec, raw_stats_t *stats)
 {
     int ret_val = OK;
+    MPI_Request barrier = NULL;
     state_t *old_state = spec->state;
 
     /* invalidate cached "old state" if the process count has changed */
@@ -54,6 +56,7 @@ int sim_test_iteration(sim_spec_t *spec, raw_stats_t *stats)
 
     spec->last_node_total_size = spec->node_count;
     spec->topology.step_index  = 0;
+    spec->topology.test_gen++;
 
     /* Create a new state for this iteration of the test */
     ret_val = state_create(&spec->topology, old_state, &spec->state);
@@ -61,19 +64,28 @@ int sim_test_iteration(sim_spec_t *spec, raw_stats_t *stats)
         return ret_val;
     }
 
-
     /* Run until everybody completes (unlimited) */
     while (ret_val == OK) {
     	ret_val = state_next_step(spec->state);
-    	spec->topology.step_index++;
-
-    	/* Sanity check: make sure we're not stuck indefinitely! */
-    	if ((spec->node_count * 1000 < spec->topology.step_index)) {
-    		return ERROR;
+    	if (spec->topology.async_mode) {
+    		if ((ret_val == DONE) || (spec->mpi_rank == 0)) {
+				int is_done = 0;
+    			if (!barrier) {
+    				MPI_Ibarrier(MPI_COMM_WORLD, &barrier);
+    			}
+    			MPI_Test(&barrier, &is_done, MPI_STATUS_IGNORE);
+    			ret_val = is_done ? DONE : OK;
+    		}
+    	} else {
+    		spec->topology.step_index++;
+    		/* Sanity check: make sure we're not stuck indefinitely! */
+    		if (spec->node_count * 1000 < spec->topology.step_index) {
+    			return ERROR;
+    		}
     	}
     }
 
-    if (ret_val != DONE) { /* The only place that should compare explicitly to ERROR */
+    if (ret_val != DONE) {
     	return ret_val;
     }
 
@@ -90,17 +102,21 @@ int sim_test(sim_spec_t *spec)
     unsigned total_test_count = spec->test_count;
     int is_root = (spec->mpi_rank == 0);
 
-    /* no need to collect statistics on deterministic algorithms */
-    if (spec->topology.model_type == COLLECTIVE_MODEL_BASE) {
-        total_test_count = 1;
-    }
-
     /* Distribute tests among processes */
-    if (is_root) {
-        my_test_count = (total_test_count / spec->mpi_size) +
-                (total_test_count % spec->mpi_size);
+    if (spec->topology.async_mode) {
+    	my_test_count = total_test_count;
     } else {
-        my_test_count = total_test_count / spec->mpi_size;
+        /* no need to collect statistics on deterministic algorithms */
+        if (spec->topology.model_type == COLLECTIVE_MODEL_BASE) {
+            total_test_count = 1;
+        }
+
+    	if (is_root) {
+    		my_test_count = (total_test_count / spec->mpi_size) +
+    				(total_test_count % spec->mpi_size);
+    	} else {
+    		my_test_count = total_test_count / spec->mpi_size;
+    	}
     }
 
     /* Prepare for subsequent test iterations */
@@ -419,22 +435,22 @@ int sim_coll_parse_args(int argc, char **argv, sim_spec_t *spec)
     while (1) {
         int option_index = 0;
         static struct option long_options[] = {
+                {"spread-avg",     required_argument, 0, 'a' },
+                {"recovery",       required_argument, 0, 'c' },
+                {"fail-rate",      required_argument, 0, 'f' }, // TODO: usage
+                {"iterations",     required_argument, 0, 'i' },
+                {"latency",        required_argument, 0, 'l' },
                 {"model",          required_argument, 0, 'm' },
                 {"topology",       required_argument, 0, 't' },
+				{"online-fails",   required_argument, 0, 'o' }, // TODO: usage
                 {"procs",          required_argument, 0, 'p' },
+				{"service-mode",   required_argument, 0, 'q' }, // TODO: usage
                 {"radix",          required_argument, 0, 'r' },
-                {"recovery",       required_argument, 0, 'c' },
-                {"fail-rate",      required_argument, 0, 'f' },
-				{"online-fails",   required_argument, 0, 'o' },
-                {"latency",        required_argument, 0, 'l' },
-				{"service-mode",   required_argument, 0, 'q' },
                 {"spread-mode",    required_argument, 0, 's' },
-                {"spread-avg",     required_argument, 0, 'a' },
-                {"iterations",     required_argument, 0, 'i' },
                 {0,                0,                 0,  0  },
         };
 
-        c = getopt_long(argc, argv, "hvm:t:p:r:c:f:o:l:s:a:i:q:",
+        c = getopt_long(argc, argv, "hvxm:t:p:r:c:f:o:l:s:a:i:q:",
                 long_options, &option_index);
         if (c == -1)
             break;
@@ -499,6 +515,12 @@ int sim_coll_parse_args(int argc, char **argv, sim_spec_t *spec)
             spec->test_count = atoi(optarg);
             break;
 
+        case 'x':
+        	spec->topology.async_mode = 1;
+        	spec->node_count = spec->mpi_size;
+            spec->topology.latency = 0;
+        	break;
+
         case 'v':
             spec->topology.verbose++;
             break;
@@ -545,6 +567,7 @@ int main(int argc, char **argv)
         goto finalize;
     }
 
+    spec.topology.my_rank = spec.mpi_rank;
     spec.topology.random_seed += spec.mpi_rank;
     if (sim_coll_parse_args(argc, argv, &spec))
     {

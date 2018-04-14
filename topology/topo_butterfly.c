@@ -1,5 +1,5 @@
-#include "topology.h"
 #include "../state/state_matrix.h"
+#include "topology.h"
 
 struct butterfly_ctx {
     comm_graph_direction_t *my_peers;

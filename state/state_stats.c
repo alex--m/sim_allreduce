@@ -1,4 +1,5 @@
 #include <stdio.h>
+
 #include "state.h"
 
 static inline void stats_reduce_ulong(unsigned long *ptr, int is_root, MPI_Op op)

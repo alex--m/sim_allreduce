@@ -2,8 +2,13 @@
 #include <math.h>
 #include <stdio.h>
 #include <assert.h>
+#include <sys/time.h>
+
 #include "state.h"
 #include "state_matrix.h"
+
+#define MEASUREMENT_ITERATIONS (10000)
+#define WARMUP_ITERATIONS (100)
 
 typedef struct state {
     unsigned bitfield_size;     /* OPTIMIZATION */
@@ -12,6 +17,8 @@ typedef struct state {
     topo_funcs_t *funcs;        /* List of functions used for iterating over nodes */
     topology_iterator_t *procs; /* Decides which way to send at every iteration */
     size_t per_proc_size;       /* The size of an iterator for a single process */
+    long async_step_usec;       /* Step duration if "Async. mode" (microseconds), or 0 */
+    struct timeval async_start; /* Context creation time, for "Async. mode" */
 
     unsigned char *new_matrix;  /* Matrix of bitwise information by source ranks */
     unsigned char *old_matrix;  /* Previous step of the matrix */
@@ -21,9 +28,113 @@ typedef struct state {
 } state_t;
 
 #define GET_ITERATOR(ctx, proc) \
-        ((topology_iterator_t*)((char*)(ctx->procs) + (proc * ctx->per_proc_size)))
+	((topology_iterator_t*)((char*)((ctx)->procs) + ((proc) * (ctx)->per_proc_size)))
 
 extern topo_funcs_t topo_map[];
+
+static inline int state_async_send(state_t *state, send_item_t *sent)
+{
+	unsigned temp_size = sizeof(send_item_t) + CTX_BITFIELD_SIZE(state);
+	send_item_t *temp = alloca(temp_size);
+	memcpy(temp, sent, sizeof(send_item_t));
+	if (sent->bitfield) {
+		memcpy(temp+1, sent->bitfield, CTX_BITFIELD_SIZE(state));
+	}
+	temp->test_gen = state->spec->test_gen;
+	return (MPI_SUCCESS == MPI_Send(temp, temp_size, MPI_BYTE, sent->dst, 0, MPI_COMM_WORLD)) ? OK : ERROR;
+}
+
+static inline int state_process(state_t *state, send_item_t *incoming);
+static inline int state_async_recv(state_t *state)
+{
+	int ret, flag = 0;
+	long unsigned test_gen = state->spec->test_gen;
+	unsigned temp_size = sizeof(send_item_t) + CTX_BITFIELD_SIZE(state);
+	send_item_t *temp = alloca(temp_size);
+	do {
+		ret = MPI_Iprobe(MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &flag, MPI_STATUS_IGNORE);
+		if (ret != MPI_SUCCESS) {
+			return ERROR;
+		}
+		if (!flag) {
+			return OK;
+		}
+
+		ret = MPI_Recv(temp, temp_size, MPI_BYTE, MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+		if (ret != MPI_SUCCESS) {
+			return ERROR;
+		}
+	} while (temp->test_gen != test_gen);
+
+	if (temp->bitfield) {
+		temp->bitfield = (unsigned char*)(temp + 1);
+	}
+	return state_process(state, temp);
+}
+
+static inline long state_async_get_step_time(state_t *state)
+{
+	long step_usec;
+	int rank, size;
+	MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+	MPI_Comm_size(MPI_COMM_WORLD, &size);
+
+	if (rank < 2) {
+		/* Create a temporary buffer to exchange */
+		unsigned temp_size = sizeof(send_item_t) + CTX_BITFIELD_SIZE(state);
+		send_item_t *temp = alloca(temp_size);
+		memset(temp, 0, temp_size);
+		temp->bitfield = (unsigned char*)(temp + 1);
+		SET_BIT_HERE(temp->bitfield, 1 - rank);
+		temp->dst = 1 - rank;
+		temp->src = rank;
+		temp->msg = 3;
+
+		/* Run some warm-up iterations */
+		int i;
+		for (i = 0; i < WARMUP_ITERATIONS; i++) {
+			int ret1, ret2, ret3;
+			if (rank == 0) {
+				ret2 = state_async_send(state, temp);
+				ret1 = MPI_Probe(MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+		        ret3 = state_next_step(state);
+			} else {
+				ret1 = MPI_Probe(MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+		        ret2 = state_next_step(state);
+				ret3 = state_async_send(state, temp);
+			}
+			if ((ret1 != MPI_SUCCESS) || (ret2 != OK) || (ret3 != OK)) {
+				return ERROR;
+			}
+		}
+
+		/* Measure the average step time in microseconds */
+		struct timeval start, end;
+		gettimeofday(&start, NULL);
+		for (i = 0; i < MEASUREMENT_ITERATIONS; i++) {
+			if (rank == 0) {
+				state_async_send(state, temp);
+				MPI_Probe(MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+				state_next_step(state);
+			} else {
+				MPI_Probe(MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+				state_next_step(state);
+				state_async_send(state, temp);
+			}
+		}
+		gettimeofday(&end, NULL);
+		step_usec = (end.tv_usec - start.tv_usec +
+				(end.tv_sec - start.tv_sec) * 1000000) / MEASUREMENT_ITERATIONS;
+		if (state->spec->verbose) {
+			printf("Rank #%i measured step to be %lu microseconds.\n", rank, step_usec);
+		}
+	}
+
+	/* Broadcast the result of the measurement */
+	MPI_Barrier(MPI_COMM_WORLD);
+	MPI_Bcast(&step_usec, 1, MPI_LONG, 0, MPI_COMM_WORLD);
+	return step_usec;
+}
 
 int state_create(topology_spec_t *spec, state_t *old_state, state_t **new_state)
 {
@@ -41,6 +152,9 @@ int state_create(topology_spec_t *spec, state_t *old_state, state_t **new_state)
         memset(&ctx->stats, 0, sizeof(ctx->stats));
         for (index = 0; index < spec->node_count; index++) {
             topology_iterator_destroy(GET_ITERATOR(ctx, index), ctx->funcs);
+            if (ctx->spec->async_mode) {
+            	break;
+            }
         }
     } else {
         ctx = calloc(1, sizeof(*ctx));
@@ -53,7 +167,8 @@ int state_create(topology_spec_t *spec, state_t *old_state, state_t **new_state)
         spec->bitfield_size = CTX_BITFIELD_SIZE(ctx) =
         		CALC_BITFIELD_SIZE(spec->node_count);
         ctx->new_matrix = calloc(1, (2 * CTX_MATRIX_SIZE(ctx)) +
-        		(spec->node_count * ctx->per_proc_size));
+        		((spec->async_mode ? 1 : ctx->spec->node_count)
+        				* ctx->per_proc_size));
         if (ctx->new_matrix == NULL)
         {
             free(ctx);
@@ -81,32 +196,64 @@ int state_create(topology_spec_t *spec, state_t *old_state, state_t **new_state)
         return ERROR;
     }
 
-    /* Initialize individual (per-node) contexts */
-    for (index = 0; index < spec->node_count; index++) {
-        topology_iterator_t *it = GET_ITERATOR(ctx, index);
+    if (spec->async_mode) {
+		topology_iterator_t *it = GET_ITERATOR(ctx, 0);
+    	spec->my_bitfield = GET_OLD_BITFIELD(ctx, 0);
+    	ret_val = topology_iterator_create(spec, ctx->funcs, it);
+    	if (ret_val != OK) {
+    		state_destroy(ctx);
+    		return ret_val;
+    	}
 
-        /* fill the initial bits (each node hold it's own data) */
-        spec->my_rank = index;
-        spec->my_bitfield = GET_OLD_BITFIELD(ctx, index);
-        SET_NEW_BIT(ctx, index, index);
+    	if (ctx->async_step_usec == 0) {
+        	gettimeofday(&ctx->async_start, NULL);
+    		ctx->async_step_usec = 1; /* For internal processing */
+    		ctx->async_step_usec = state_async_get_step_time(ctx);
 
-        /* initialize the iterators over the topology requested */
-        ret_val = topology_iterator_create(spec, ctx->funcs, it);
-        if (ret_val != OK) {
-        	state_destroy(ctx);
-        	return ret_val;
-        }
+    		topology_iterator_destroy(it, ctx->funcs);
+        	ret_val = topology_iterator_create(spec, ctx->funcs, it);
+        	if (ret_val != OK) {
+        		state_destroy(ctx);
+        		return ret_val;
+        	}
+    	}
+
+    	gettimeofday(&ctx->async_start, NULL);
+    	SET_NEW_BIT(ctx, 0, spec->my_rank);
+    } else {
+    	/* Initialize individual (per-node) contexts */
+    	for (index = 0; index < spec->node_count; index++) {
+    		/* fill the initial bits (each node hold it's own data) */
+    		topology_iterator_t *it = GET_ITERATOR(ctx, index);
+    		spec->my_rank = index;
+    		spec->my_bitfield = GET_OLD_BITFIELD(ctx, index);
+    		SET_NEW_BIT(ctx, index, index);
+
+    		/* initialize the iterators over the topology requested */
+    		ret_val = topology_iterator_create(spec, ctx->funcs, it);
+    		if (ret_val != OK) {
+    			state_destroy(ctx);
+    			return ret_val;
+    		}
+    	}
     }
 
     /* Choose dead (offline-fail) nodes, if applicable */
     if (((spec->model_type == COLLECTIVE_MODEL_NODES_MISSING) ||
     	 (spec->model_type == COLLECTIVE_MODEL_REAL)) &&
-    	(spec->model.offline_fail_rate >= 1.0)){
+    	 (spec->model.offline_fail_rate >= 1.0)){
 		for (index = 0; index < spec->model.offline_fail_rate; index++) {
 			do {
 				dead_node = CYCLIC_RANDOM(spec, spec->node_count);
 			} while (dead_node == 0);
-			SET_DEAD(GET_ITERATOR(ctx, dead_node));
+			if (spec->async_mode) {
+				MPI_Bcast(&dead_node, 1, MPI_UNSIGNED_LONG, 0, MPI_COMM_WORLD);
+				if (dead_node == spec->my_rank) {
+					SET_DEAD(GET_ITERATOR(ctx, 0));
+				}
+			} else {
+				SET_DEAD(GET_ITERATOR(ctx, dead_node));
+			}
 			if (spec->verbose) {
 				printf("OFFLINE DEAD: %lu\n", dead_node);
 			}
@@ -116,18 +263,30 @@ int state_create(topology_spec_t *spec, state_t *old_state, state_t **new_state)
     /* Choose faulty (online-fail) nodes, if applicable */
     if (((spec->model_type == COLLECTIVE_MODEL_NODES_FAILING) ||
     	 (spec->model_type == COLLECTIVE_MODEL_REAL)) &&
-    	(spec->model.online_fail_rate >= 1.0)){
+    	 (spec->model.online_fail_rate >= 1.0)){
 		for (index = 0; index < spec->model.online_fail_rate; index++) {
 			do {
 				dead_node = CYCLIC_RANDOM(spec, spec->node_count);
 			} while (dead_node == 0);
-			GET_ITERATOR(ctx, dead_node)->death_offset =
-					CYCLIC_RANDOM(spec, spec->latency * (1 + (int)log10(spec->node_count)));
+			if (spec->async_mode) {
+				MPI_Bcast(&dead_node, 1, MPI_UNSIGNED_LONG, 0, MPI_COMM_WORLD);
+				if (dead_node == spec->my_rank) {
+					GET_ITERATOR(ctx, 0)->death_offset =
+							CYCLIC_RANDOM(spec, spec->latency * (1 + (int)log10(spec->node_count)));
+				}
+			} else {
+				GET_ITERATOR(ctx, dead_node)->death_offset =
+						CYCLIC_RANDOM(spec, spec->latency * (1 + (int)log10(spec->node_count)));
+			}
 			// TODO: find a better upper-limit!
 			if (spec->verbose) {
 				printf("ONLINE DEAD: %lu (at step #%lu)\n", dead_node, GET_ITERATOR(ctx, dead_node)->death_offset);
 			}
 		}
+    }
+
+    if (spec->async_mode) {
+    	MPI_Barrier(MPI_COMM_WORLD); /* For timing synchronization among processes */
     }
 
     *new_state = ctx;
@@ -161,14 +320,19 @@ static inline int state_enqueue(state_t *state, send_item_t *sent, send_list_t *
     }
 
     if (list == NULL) {
-    	list = &state->outq;
     	if (sent->msg != MSG_DEATH) {
+    		/* Send packets that require no queuing */
+    		if (state->spec->async_mode) {
+    			return state_async_send(state, sent);
+    		}
+
     		/* Count this message and it's length */
     		state->stats.messages_counter++;
     		assert(sent->bitfield != BITFIELD_IGNORE_DATA);
     		state->stats.data_len_counter += POPCOUNT_HERE(sent->bitfield,
     				state->spec->node_count);
     	}
+    	list = &state->outq;
     }
 
     /* make sure chuck has free slots */
@@ -245,19 +409,20 @@ int global_enqueue(send_item_t *sent, send_list_t *queue, unsigned bitfield_size
 static inline int state_process(state_t *state, send_item_t *incoming)
 {
     int ret_val = OK;
-    topology_iterator_t *destination = GET_ITERATOR(state, incoming->dst);
+    topology_iterator_t *destination = GET_ITERATOR(state,
+    		state->spec->async_mode ? 0 : incoming->dst);
 
     if (incoming->msg == MSG_DEATH) {
-    	assert(IS_DEAD(GET_ITERATOR(state, incoming->src)));
+    	node_id local_node = state->spec->async_mode ? 0 : incoming->dst;
+    	assert((state->spec->async_mode) || (IS_DEAD(GET_ITERATOR(state, incoming->src))));
     	assert(state->spec->model_type > COLLECTIVE_MODEL_SPREAD);
-    	SET_NEW_BIT(state, incoming->dst, incoming->src);
-    	if (POPCOUNT(state, incoming->dst) == state->spec->node_count) {
-    		SET_FULL(state, incoming->dst);
+    	SET_NEW_BIT(state, local_node, incoming->src);
+    	if (POPCOUNT(state, local_node) == state->spec->node_count) {
+    		SET_FULL(state, local_node);
     	}
 
-    	return topology_iterator_omit(destination,
-    			state->funcs, state->spec->topology.tree.recovery,
-				GET_ITERATOR(state, incoming->src), 1);
+    	return topology_iterator_omit(destination, state->funcs,
+    			state->spec->topology.tree.recovery, incoming->src, 1);
     }
 
     if (IS_DEAD(destination)) {
@@ -294,7 +459,11 @@ static inline int state_dequeue(state_t *state)
          slot_idx++, item++) {
         if (item->distance != DISTANCE_VACANT) {
             if (--(item->distance) == DISTANCE_VACANT) {
-                ret_val = state_process(state, item);
+                if (state->spec->async_mode) {
+                	ret_val = state_async_send(state, item);
+                } else {
+                	ret_val = state_process(state, item);
+                }
                 if (ret_val != OK) {
                 	return ret_val;
                 }
@@ -304,21 +473,24 @@ static inline int state_dequeue(state_t *state)
         }
     }
 
+    if (state->spec->async_mode) {
+    	return state_async_recv(state);
+    }
+
     return ret_val;
 }
 
 extern step_num topology_max_offset;
 
-/* generate a list of packets to be sent out to other peers (for MPI_Alltoallv) */
 int state_next_step(state_t *state)
 {
     int ret_val;
-    node_id idx;
+    node_id idx, cnt;
     send_item_t res;
     node_id dead_count    = 0;
     topology_spec_t *spec = state->spec;
     topo_funcs_t *funcs   = state->funcs;
-    node_id active_count  = spec->node_count - 1; // #0 is up forever
+    node_id active_count;
 
     /* Deliver queued packets */
     ret_val = state_dequeue(state);
@@ -330,8 +502,25 @@ int state_next_step(state_t *state)
     memcpy(state->old_matrix, state->new_matrix, CTX_MATRIX_SIZE(state));
 
     /* Iterate over all process-iterators */
-    for (idx = 0; idx < state->spec->node_count; idx++) {
-        topology_iterator_t *iterator = GET_ITERATOR(state, idx);
+    if (state->spec->async_mode) {
+    	struct timeval now;
+    	gettimeofday(&now, NULL);
+    	spec->step_index = ((now.tv_sec - state->async_start.tv_sec) * 1000000 +
+    		(now.tv_usec - state->async_start.tv_usec)) / state->async_step_usec;
+
+        idx          = state->spec->my_rank;
+        cnt          = idx + 1;
+        active_count = 1;
+    } else {
+        idx          = 0;
+        cnt          = state->spec->node_count;
+        active_count = spec->node_count - 1;
+    }
+
+    for (; idx < cnt; idx++) {
+        node_id local_rank = (state->spec->async_mode) ? 0 : idx;
+        topology_iterator_t *iterator = GET_ITERATOR(state, local_rank);
+
         if (IS_DEAD(iterator)) {
             res.distance = DISTANCE_NO_PACKET;
             res.dst = DESTINATION_DEAD;
@@ -351,19 +540,18 @@ int state_next_step(state_t *state)
             } else if (res.distance != DISTANCE_NO_PACKET) {
         		if (res.msg == MSG_DEATH) {
             		if (res.bitfield != BITFIELD_IGNORE_DATA) {
-            			MERGE(state, idx, res.bitfield);
+            			MERGE(state, local_rank, res.bitfield);
             		}
-        			ret_val = topology_iterator_omit(GET_ITERATOR(state, idx),
-        					state->funcs, state->spec->topology.tree.recovery,
-							GET_ITERATOR(state, res.src), 0);
+        			ret_val = topology_iterator_omit(GET_ITERATOR(state, local_rank),
+        					state->funcs, state->spec->topology.tree.recovery, res.src, 0);
         		} else if (res.dst == idx) {
             		if (res.bitfield != BITFIELD_IGNORE_DATA) {
-            			MERGE(state, idx, res.bitfield);
+            			MERGE(state, local_rank, res.bitfield);
             		}
             	} else {
             		/* Send this outgoing packet */
             		res.src = idx;
-            		res.bitfield = GET_OLD_BITFIELD(state, idx);
+            		res.bitfield = GET_OLD_BITFIELD(state, local_rank);
             		ret_val = state_enqueue(state, &res, NULL);
             	}
             }
@@ -374,48 +562,49 @@ int state_next_step(state_t *state)
         }
 
         /* optionally, output debug information */
-        if (state->spec->verbose > 1) {
-            if (idx == 0) {
-                printf("\n");
-            }
-            if (IS_DEAD(iterator)) {
-            	printf("\nproc=%lu\tpopcount=DEAD\t", idx);
-            } else {
-            	printf("\nproc=%lu\tpopcount=%u\t", idx, POPCOUNT(state, idx));
-            }
-            PRINT(state, idx);
-            if (ret_val == DONE) {
-            	printf(" - Done!");
-            } else if (res.distance != DISTANCE_NO_PACKET) {
-            	if (res.dst == idx) {
-            		if (res.msg == MSG_DEATH) {
-            			printf(" - accepts from #%lu (includes DEATH NOTIFICATION!)", res.src);
-            		} else {
-            			printf(" - accepts from #%lu (type=%lu)", res.src, res.msg);
-            		}
-            	} else {
-            		assert(res.dst < state->spec->node_count);
-            		printf(" - sends to #%lu (msg=%lu)", res.dst, res.msg);
-            	}
-            } else if (res.dst == DESTINATION_UNKNOWN) {
-            	printf(" - waits for somebody - max timeout is %lu (now is %lu)", res.src, spec->step_index);
-            } else if (res.dst == DESTINATION_SPREAD) {
-            	printf(" - pending (spread)");
-            } else if (res.dst == DESTINATION_DEAD) {
-                printf(" - DEAD");
-            } else if (res.dst == DESTINATION_IDLE) {
-                printf(" - IDLE!");
-            } else {
-                printf(" - waits for #%lu (timeout=%lu)", res.dst, res.timeout);
-            }
+        if ((state->spec->verbose) && (!state->spec->async_mode)) {
+        	if (state->spec->verbose > 1) {
+        		if (idx == 0) {
+        			printf("\n");
+        		}
+        		if (IS_DEAD(iterator)) {
+        			printf("\nproc=%lu\tpopcount=DEAD\t", idx);
+        		} else {
+        			printf("\nproc=%lu\tpopcount=%u\t", idx, POPCOUNT(state, local_rank));
+        		}
+        		PRINT(state, local_rank);
+        		if (ret_val == DONE) {
+        			printf(" - Done!");
+        		} else if (res.distance != DISTANCE_NO_PACKET) {
+        			if (res.dst == idx) {
+        				if (res.msg == MSG_DEATH) {
+        					printf(" - accepts from #%lu (includes DEATH NOTIFICATION!)", res.src);
+        				} else {
+        					printf(" - accepts from #%lu (type=%lu)", res.src, res.msg);
+        				}
+        			} else {
+        				assert(res.dst < state->spec->node_count);
+        				printf(" - sends to #%lu (msg=%lu)", res.dst, res.msg);
+        			}
+        		} else if (res.dst == DESTINATION_UNKNOWN) {
+        			printf(" - waits for somebody - max timeout is %lu (now is %lu)", res.src, spec->step_index);
+        		} else if (res.dst == DESTINATION_SPREAD) {
+        			printf(" - pending (spread)");
+        		} else if (res.dst == DESTINATION_DEAD) {
+        			printf(" - DEAD");
+        		} else if (res.dst == DESTINATION_IDLE) {
+        			printf(" - IDLE!");
+        		} else {
+        			printf(" - waits for #%lu (timeout=%lu)", res.dst, res.timeout);
+        		}
+        	}
+
+        	printf("step #%lu (spread=%lu): active_count=%lu dead_count=%lu diff=%lu\n",
+        			state->spec->step_index, topology_max_offset,
+					active_count, dead_count, (active_count - dead_count) );
         }
     }
 
-    if (state->spec->verbose) {
-    	printf("step #%lu (spread=%lu): active_count=%lu dead_count=%lu diff=%lu\n",
-    			state->spec->step_index, topology_max_offset,
-				active_count, dead_count, (active_count - dead_count) );
-    }
     if ((active_count - dead_count) == 0) {
     	topology_iterator_t *iterator   = GET_ITERATOR(state, 0);
         state->stats.max_queueu_len     = iterator->in_queue.max;
@@ -423,25 +612,26 @@ int state_next_step(state_t *state)
         state->stats.last_step_counter  = state->spec->step_index;
         state->stats.death_toll         = dead_count;
 
-        /* Find longest queue ever */
-        for (idx = 1; idx < state->spec->node_count; idx++) {
-        	iterator = GET_ITERATOR(state, idx);
-        	if ((!IS_DEAD(iterator)) &&
-        	    (state->stats.max_queueu_len < iterator->in_queue.max)) {
-        		state->stats.max_queueu_len = iterator->in_queue.max;
+        if (!state->spec->async_mode) {
+        	/* Find longest queue ever */
+        	for (idx = 1; idx < state->spec->node_count; idx++) {
+        		iterator = GET_ITERATOR(state, idx);
+        		if ((!IS_DEAD(iterator)) &&
+        				(state->stats.max_queueu_len < iterator->in_queue.max)) {
+        			state->stats.max_queueu_len = iterator->in_queue.max;
+        		}
+        	}
+
+        	/* Find earliest finisher ever */
+        	// Note: Does NOT include #0 for spread calculation!
+        	for (idx = 1; idx < state->spec->node_count; idx++) {
+        		iterator = GET_ITERATOR(state, idx);
+        		if ((!IS_DEAD(iterator)) &&
+        				(state->stats.first_step_counter > iterator->finish)) {
+        			state->stats.first_step_counter = iterator->finish;
+        		}
         	}
         }
-
-        /* Find earliest finisher ever */
-        // Note: Does NOT include #0 for spread calculation!
-        for (idx = 1; idx < state->spec->node_count; idx++) {
-        	iterator = GET_ITERATOR(state, idx);
-        	if ((!IS_DEAD(iterator)) &&
-        		(state->stats.first_step_counter > iterator->finish)) {
-        		state->stats.first_step_counter = iterator->finish;
-        	}
-        }
-
         return DONE;
     }
     return OK;
@@ -464,6 +654,9 @@ void state_destroy(state_t *ctx)
         unsigned i;
         for (i = 0; i < ctx->spec->node_count; i++) {
             topology_iterator_destroy(GET_ITERATOR(ctx, i), ctx->funcs);
+            if (ctx->spec->async_mode) {
+            	break;
+            }
         }
     }
 

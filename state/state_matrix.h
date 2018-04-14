@@ -12,8 +12,8 @@
 
 #define CTX_BITFIELD_SIZE(ctx) ((ctx)->bitfield_size)
 
-#define CTX_MATRIX_SIZE(ctx) \
-    ((ctx)->spec->node_count * CTX_BITFIELD_SIZE(ctx))
+#define CTX_MATRIX_SIZE(ctx) (((ctx)->spec->async_mode ? \
+	1 : (ctx)->spec->node_count) * CTX_BITFIELD_SIZE(ctx))
 
 #define GET_OLD_BITFIELD(ctx, local_node) ((ctx)->old_matrix + \
     ((local_node) * CTX_BITFIELD_SIZE(ctx)))
@@ -92,7 +92,7 @@
             *present |= *added;                                               \
             out_cnt += __builtin_popcount(*present);                          \
         }                                                                     \
-		if (in_cnt == 0) return ERROR;                                        \
+		if ((in_cnt == 0) && (!ctx->spec->async_mode)) return ERROR;          \
 		if (out_cnt == ctx->spec->node_count) SET_FULL(ctx, local_node);      \
     }                                                                         \
 })

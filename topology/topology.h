@@ -61,6 +61,8 @@ typedef struct topology_spec
     unsigned random_seed;
     step_num step_index; /* struct abuse in favor of optimization */
     step_num latency;
+    int async_mode;
+    long unsigned test_gen; /* protection from mixing packets between async. tests */
 
     topology_type_t topology_type;
     union {
@@ -100,6 +102,7 @@ typedef struct send_item {
 #define           DISTANCE_SEND_NOW    (1)
     step_num      timeout;   /* packet timeout (after which consider peer dead),
                                 after subtracting the initial send distance */
+    long unsigned test_gen;  /* protection from mixing packets between async. tests */
 #define TIMEOUT_NEVER ((step_num)-1) /* Packet does not expect a response (protocol-specific) */
     unsigned char *bitfield; /* pointer to the packet data - MUST BE LAST MEMBER */
 #define           BITFIELD_IGNORE_DATA (NULL)
@@ -146,7 +149,7 @@ typedef struct topo_funcs
                      void *internal_ctx, send_item_t *result);
     int    (*fix_f)(comm_graph_t *graph, void *internal_ctx,
                     tree_recovery_method_t method,
-					void *source_internal_ctx, int source_is_dead);
+					node_id source, int source_is_dead);
     void   (*stop_f)(void *internal_ctx);
 } topo_funcs_t;
 
@@ -168,7 +171,7 @@ int topology_iterator_next(topology_spec_t *spec,
 int topology_iterator_omit(topology_iterator_t *iterator,
 						   topo_funcs_t *funcs,
                            tree_recovery_method_t method,
-						   topology_iterator_t *source_iterator,
+						   node_id source,
 						   int source_is_dead);
 
 void topology_iterator_destroy(topology_iterator_t *iterator, topo_funcs_t *funcs);
