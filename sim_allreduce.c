@@ -40,6 +40,7 @@ typedef struct sim_spec
  *                                                                           *
 \*****************************************************************************/
 
+extern int sim_fast_tree(topology_spec_t *spec, raw_stats_t *stats);
 int sim_test_iteration(sim_spec_t *spec, raw_stats_t *stats)
 {
     int ret_val = OK;
@@ -57,6 +58,10 @@ int sim_test_iteration(sim_spec_t *spec, raw_stats_t *stats)
     spec->last_node_total_size = spec->node_count;
     spec->topology.step_index  = 0;
     spec->topology.test_gen++;
+
+    if (spec->topology.async_mode) {
+    	return sim_fast_tree(&spec->topology, stats);
+    }
 
     /* Create a new state for this iteration of the test */
     ret_val = state_create(&spec->topology, old_state, &spec->state);
@@ -230,14 +235,15 @@ int sim_coll_tree_recovery(sim_spec_t *spec)
 int sim_coll_radix_topology(sim_spec_t *spec)
 {
     int ret_val = OK;
-    unsigned radix;
+    unsigned radix, max_radix;
 
     if (spec->topology.topology.tree.radix != 0) {
         return sim_test(spec);
     }
 
+    max_radix = spec->topology.latency ? 2 * spec->topology.latency : 10;
     for (radix = 2;
-         ((radix <= 2 * spec->topology.latency) &&
+         ((radix <= max_radix) &&
           (radix <= spec->node_count) &&
           (ret_val == OK));
          radix++) {

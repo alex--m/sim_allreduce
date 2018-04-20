@@ -444,6 +444,7 @@ static inline int tree_next_by_topology(tree_context_t *ctx,
         	if (ctx->my_rank != 0) {
         		break;
         	}
+        	/* no break */
         case TREE_WAIT:
             /* Wait for bitmap to be full before distributing */
             if (!IS_FULL_HERE(ctx->my_bitfield)) {
@@ -686,30 +687,33 @@ service_distance:
 }
 
 
-int tree_fix_peer(tree_context_t *ctx, tree_recovery_method_t recovery, node_id dead, int is_father_dead)
+int tree_fix_peer(tree_context_t *ctx, comm_graph_t *graph, node_id my_rank,
+		tree_recovery_method_t recovery, node_id dead, int is_father_dead)
 {
 	enum comm_graph_direction_type src_dir, dst_dir;
-	node_id me = ctx->my_rank;
+	node_id me = my_rank;
 	tree_contact_t *contact;
 	step_num dead_distance;
 	node_id idx, extra;
 
     /* Exclude the dead node from further sends */
-    int ret = comm_graph_append(ctx->graph, me, dead, COMM_GRAPH_EXCLUDE);
+    int ret = comm_graph_append(graph, me, dead, COMM_GRAPH_EXCLUDE);
     if (ret != OK) {
         return ret;
     }
 
     /* Find the dead contact */
-    ret = tree_contact_lookup(ctx, dead, DISTANCE_VACANT, &contact);
-    if (ret != OK) {
-    	if (ret == DONE) {
-    		/* If a KA was followed by DATA - a node could be marked twice as dead */
-    		return OK;
+    if (ctx) {
+    	ret = tree_contact_lookup(ctx, dead, DISTANCE_VACANT, &contact);
+    	if (ret != OK) {
+    		if (ret == DONE) {
+    			/* If a KA was followed by DATA - a node could be marked twice as dead */
+    			return OK;
+    		}
+    		return ret;
     	}
-        return ret;
+    	dead_distance = contact->distance + 1;
     }
-    dead_distance = contact->distance + 1;
 
     /* Restructure the tree to disregard the dead node */
     switch (recovery) {
@@ -728,19 +732,21 @@ int tree_fix_peer(tree_context_t *ctx, tree_recovery_method_t recovery, node_id 
         	dst_dir = COMM_GRAPH_EXTRA_CHILDREN;
         }
 
-        idx = ctx->graph->nodes[me].directions[dst_dir]->node_count;
-        ret = comm_graph_copy(ctx->graph, dead, me, src_dir, dst_dir);
+        idx = graph->nodes[me].directions[dst_dir]->node_count;
+        ret = comm_graph_copy(graph, dead, me, src_dir, dst_dir);
         if (ret != OK) {
 
         	return ret;
         }
 
-        for (; idx < ctx->graph->nodes[me].directions[dst_dir]->node_count; idx++) {
-        	extra = ctx->graph->nodes[me].directions[dst_dir]->nodes[idx];
+        for (; idx < graph->nodes[me].directions[dst_dir]->node_count; idx++) {
+        	extra = graph->nodes[me].directions[dst_dir]->nodes[idx];
         	//printf("Added New peer: %lu (as father? %i)\n", extra, is_father_dead);
-        	ret = tree_contact_lookup(ctx, extra, dead_distance, &contact);
-        	if (ret != OK) {
-        		return ret;
+        	if (ctx) {
+        		ret = tree_contact_lookup(ctx, extra, dead_distance, &contact);
+        		if (ret != OK) {
+        			return ret;
+        		}
         	}
         }
         break;
@@ -750,32 +756,23 @@ int tree_fix_peer(tree_context_t *ctx, tree_recovery_method_t recovery, node_id 
         return ERROR;
     }
 
-    /* Remove this contact */
-    ret = tree_contact_lookup(ctx, dead, DISTANCE_VACANT, &contact);
-    if (ret != OK) {
-        return ret;
+    if (ctx) {
+    	/* Remove this contact */
+    	ret = tree_contact_lookup(ctx, dead, DISTANCE_VACANT, &contact);
+    	if (ret != OK) {
+    		return ret;
+    	}
+    	contact->distance = DISTANCE_VACANT;
     }
-    contact->distance = DISTANCE_VACANT;
     return ret;
 }
 
-
-
-int tree_fix(comm_graph_t *graph, tree_context_t *ctx,
-             tree_recovery_method_t recovery,
-			 node_id source, int source_is_dead)
+int tree_fix_graph(tree_context_t *ctx, comm_graph_t *graph, node_id my_rank,
+		tree_recovery_method_t recovery, node_id source, int source_is_dead,
+		int *is_father_dead)
 {
-    node_id idx, jdx = 0, tmp, me = ctx->my_rank;
-    int is_father_dead, ret;
-    node_id *kill_route;
-
-    //printf("\nOMIT: %lu asked %lu to omit... (itself? %i)\n", source, me, source_is_dead);
-
-    /* Update my pointer to the cloned graph */
-    ctx->graph = graph;
-    ctx->my_node = &ctx->graph->nodes[ctx->my_rank];
-
     /* Calculate route (in nodes) from myself to the dead node */
+    node_id *kill_route, idx, jdx = 0, tmp, me = my_rank;
     kill_route = alloca(sizeof(node_id) * graph->max_depth);
     if (me < source) {
     	for (idx = source; ((idx != me) && (idx != 0));
@@ -794,7 +791,7 @@ int tree_fix(comm_graph_t *graph, tree_context_t *ctx,
     			kill_route[jdx - idx - 1] = tmp;
     		}
     	}
-    	is_father_dead = 0; /* Children are adopted */
+    	*is_father_dead = 0; /* Children are adopted */
     } else {
     	for (idx = me; (idx != source) && (idx != 0);
     		 idx = (graph->nodes[idx].directions[COMM_GRAPH_FATHERS]->node_count > 1) ?
@@ -808,22 +805,42 @@ int tree_fix(comm_graph_t *graph, tree_context_t *ctx,
         if (source_is_dead) {
         	kill_route[jdx++] = source;
         }
-    	is_father_dead = 1; /* Grandfather contacted */
+    	*is_father_dead = 1; /* Grandfather contacted */
     }
 
     if ((idx == 0) && (me > 0) && (source != 0) &&
     	(me <= graph->nodes[0].directions[COMM_GRAPH_FATHERS]->node_count)) {
-    	is_father_dead = 0; /* Children are adopted */
+    	*is_father_dead = 0; /* Children are adopted */
     }
 
     /* Kill nodes along calculated route */
     for (idx = 0; idx < jdx; idx++) {
     	//printf("remove peer %lu\n", kill_route[idx]);
-    	ret = tree_fix_peer(ctx, recovery, kill_route[idx], is_father_dead);
+    	int ret = tree_fix_peer(ctx, graph, my_rank, recovery,
+    			kill_route[idx], *is_father_dead);
     	if ((ret != OK) && (ret != DONE)) {
     		return ret;
     	}
     }
+
+    return OK;
+}
+
+int tree_fix(comm_graph_t *graph, tree_context_t *ctx,
+             tree_recovery_method_t recovery,
+			 node_id source, int source_is_dead)
+{
+	int is_father_dead;
+    //printf("\nOMIT: %lu asked %lu to omit... (itself? %i)\n", source, me, source_is_dead);
+	int ret = tree_fix_graph(ctx, graph, ctx->my_rank, recovery, source,
+			source_is_dead, &is_father_dead);
+    if (ret) {
+    	return ret;
+    }
+
+    /* Update my pointer to the cloned graph */
+    ctx->graph = graph;
+    ctx->my_node = &ctx->graph->nodes[ctx->my_rank];
 
     if (is_father_dead) {
         /* Reset the count on received nodes - so new nodes may be considered */
@@ -837,6 +854,7 @@ int tree_fix(comm_graph_t *graph, tree_context_t *ctx,
     	ctx->next_wait_index = 0;
     	ctx->next_send_index = 0;
     }
+
     return OK;
 }
 
