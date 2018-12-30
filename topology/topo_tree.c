@@ -391,6 +391,7 @@ static inline int tree_next_by_topology(tree_context_t *ctx,
                         current_step_index   = *ctx->step_index;
                         result->timeout      = (contact->timeout != TIMEOUT_NEVER) ?
                                 contact->timeout : (contact->between_kas - current_step_index + contact->timeout_sent);
+                        // TODO: Fix negative timeout values wrapping around!
                         return OK;
                     }
                 }

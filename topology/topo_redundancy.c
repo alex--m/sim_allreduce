@@ -107,22 +107,22 @@ int debruijn_build(topology_spec_t *spec, comm_graph_t **graph)
 
     for (next_id = 0; next_id < node_count; next_id++) {
         node_id connection = (next_id >> 1) |  left_bit;
-        if (connection < node_count) {
+        if ((connection != next_id) && (connection < node_count)) {
             comm_graph_append(*graph, next_id, connection, COMM_GRAPH_CHILDREN);
         }
 
         connection = (next_id >> 1) & ~left_bit;
-        if (connection < node_count) {
+        if ((connection != next_id) && (connection < node_count)) {
             comm_graph_append(*graph, next_id, connection, COMM_GRAPH_CHILDREN);
         }
 
         connection =  ((next_id << 1) | 1) & ~extra_bit;
-        if (connection < node_count) {
+        if ((connection != next_id) && (connection < node_count)) {
             comm_graph_append(*graph, next_id, connection, COMM_GRAPH_CHILDREN);
         }
 
         connection = (next_id << 1) & ~1 & ~extra_bit;
-        if (connection < node_count) {
+        if ((connection != next_id) && (connection < node_count)) {
             comm_graph_append(*graph, next_id, connection, COMM_GRAPH_CHILDREN);
         }
     }

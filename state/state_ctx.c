@@ -188,6 +188,10 @@ int state_create(topology_spec_t *spec, state_t *old_state, state_t **new_state)
         ctx->funcs = &topo_map[TREE];
         break;
 
+    case COLLECTIVE_TOPOLOGY_OPTIMAL_TREE:
+        ctx->funcs = &topo_map[OPTIMAL];
+        break;
+
     case COLLECTIVE_TOPOLOGY_DE_BROIJN:
         ctx->funcs = &topo_map[DE_BRUIJN];
         break;

@@ -11,6 +11,17 @@ int tree_fix(comm_graph_t *graph, void *internal_ctx,
 void tree_stop(void *internal_ctx);
 
 
+size_t optimal_ctx_size();
+int optimal_build(topology_spec_t *spec, comm_graph_t **graph);
+int optimal_start(topology_spec_t *spec, comm_graph_t *graph, void *internal_ctx);
+int optimal_next(comm_graph_t *graph, send_list_t *in_queue,
+              void *internal_ctx, send_item_t *result);
+int optimal_fix(comm_graph_t *graph, void *internal_ctx,
+             tree_recovery_method_t recovery, node_id source,
+             int source_is_dead);
+void optimal_stop(void *internal_ctx);
+
+
 size_t redundancy_ctx_size();
 int debruijn_build(topology_spec_t *spec, comm_graph_t **graph);
 int hypercube_build(topology_spec_t *spec, comm_graph_t **graph);
@@ -42,6 +53,14 @@ topo_funcs_t topo_map[] = {
                 .next_f = tree_next,
                 .fix_f = tree_fix,
                 .stop_f = tree_stop,
+        },
+        {
+                .size_f = optimal_ctx_size,
+                .build_f = optimal_build,
+                .start_f = optimal_start,
+                .next_f = optimal_next,
+                .fix_f = optimal_fix,
+                .stop_f = optimal_stop,
         },
         {
                 .size_f = redundancy_ctx_size,

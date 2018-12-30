@@ -417,9 +417,10 @@ const char HELP_STRING[] =
         "        1 - K-nomial tree\n"
         "        2 - N-ary tree, multi-root\n"
         "        3 - K-nomial tree, multi-root\n"
-        "        4 - De-broijn network\n"
-        "        5 - Hyper-Cube\n"
-        "        6 - All of the above (default)\n\n"
+        "        4 - Optimal tree\n"
+        "        5 - De-broijn network\n"
+        "        6 - Hyper-Cube\n"
+        "        7 - All of the above (default)\n\n"
         "    -i|--iterations <iter-count> - Test iteration count (default: 1)\n"
         "    -p|--procs <proc-count> - Set Amount of processes to simulate"
         " (default: iterate from 2 to infinity in powers of 2)\n\n"
@@ -537,7 +538,7 @@ int sim_coll_parse_args(int argc, char **argv, sim_spec_t *spec)
         case 'h':
         default:
             printf(HELP_STRING);
-            return ERROR;
+            return -1; /* Same as "ERROR", but no printing... */
         }
     }
 
@@ -580,7 +581,7 @@ int main(int argc, char **argv)
     spec.topology.random_seed += spec.mpi_rank;
     if (sim_coll_parse_args(argc, argv, &spec))
     {
-        return ERROR;
+        return -1; /* Same as "ERROR", but no printing... */
     }
 
     if (spec.mpi_rank == 0) {
