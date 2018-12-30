@@ -10,6 +10,19 @@ int tree_fix(comm_graph_t *graph, void *internal_ctx,
              int source_is_dead);
 void tree_stop(void *internal_ctx);
 
+
+size_t redundancy_ctx_size();
+int debruijn_build(topology_spec_t *spec, comm_graph_t **graph);
+int hypercube_build(topology_spec_t *spec, comm_graph_t **graph);
+int redundancy_start(topology_spec_t *spec, comm_graph_t *graph, void *internal_ctx);
+int redundancy_next(comm_graph_t *graph, send_list_t *in_queue,
+                   void *internal_ctx, send_item_t *result);
+int redundancy_fix(comm_graph_t *graph, void *internal_ctx,
+                  tree_recovery_method_t recovery, node_id source,
+                  int source_is_dead);
+void redundancy_stop(void *internal_ctx);
+
+
 size_t butterfly_ctx_size();
 int butterfly_build(topology_spec_t *spec, comm_graph_t **graph);
 int butterfly_start(topology_spec_t *spec, comm_graph_t *graph, void *internal_ctx);
@@ -20,6 +33,7 @@ int butterfly_fix(comm_graph_t *graph, void *internal_ctx,
                   int source_is_dead);
 void butterfly_stop(void *internal_ctx);
 
+
 topo_funcs_t topo_map[] = {
         {
                 .size_f = tree_ctx_size,
@@ -28,6 +42,22 @@ topo_funcs_t topo_map[] = {
                 .next_f = tree_next,
                 .fix_f = tree_fix,
                 .stop_f = tree_stop,
+        },
+        {
+                .size_f = redundancy_ctx_size,
+                .build_f = debruijn_build,
+                .start_f = redundancy_start,
+                .next_f = redundancy_next,
+                .fix_f = redundancy_fix,
+                .stop_f = redundancy_stop,
+        },
+        {
+                .size_f = redundancy_ctx_size,
+                .build_f = hypercube_build,
+                .start_f = redundancy_start,
+                .next_f = redundancy_next,
+                .fix_f = redundancy_fix,
+                .stop_f = redundancy_stop,
         },
         {
                 .size_f = butterfly_ctx_size,

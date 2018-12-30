@@ -27,9 +27,14 @@
 *.i*86
 *.x86_64
 *.hex
+sim_allreduce
 
 # Debug files
 *.dSYM/
 *.su
-/Debug/
-/Release/
+*.pdf
+.cproject
+.externalToolBuilders
+.project
+/Debug
+/Release

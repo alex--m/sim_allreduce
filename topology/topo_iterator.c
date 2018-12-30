@@ -28,48 +28,48 @@ double NormalCDFInverse(double p);
 double RationalApproximation(double t);
 double RationalApproximation(double t)
 {
-	double c[] = {2.515517, 0.802853, 0.010328};
-	double d[] = {1.432788, 0.189269, 0.001308};
-	return (t - ((c[2]*t + c[1])*t + c[0]) /
+    double c[] = {2.515517, 0.802853, 0.010328};
+    double d[] = {1.432788, 0.189269, 0.001308};
+    return (t - ((c[2]*t + c[1])*t + c[0]) /
                    (((d[2]*t + d[1])*t + d[0])*t + 1.0));
 }
 double NormalCDFInverse(double p)
 {
-	assert(p > 0.0 && p < 1.0);
-	return (p < 0.5)?
-		-RationalApproximation(sqrt(-2.0 * log(p))):
-		RationalApproximation(sqrt(-2.0 * log(1 - p)));
+    assert(p > 0.0 && p < 1.0);
+    return (p < 0.5)?
+        -RationalApproximation(sqrt(-2.0 * log(p))):
+        RationalApproximation(sqrt(-2.0 * log(1 - p)));
 }
 
 double icdf(double p, double av, double sd)
 {
-	return(NormalCDFInverse(p) * sd + av);
+    return(NormalCDFInverse(p) * sd + av);
 }
 
 long gaussian_random(long spread, topology_spec_t *spec)
 {
-	static long base = -1;
-	static long savedspread;
+    static long base = -1;
+    static long savedspread;
 
-	if(base == -1 || spread != savedspread)
-	{
-		base = -icdf(1.0 / (RAND_MAX + 2.0), 0.0, spread);
-		savedspread = spread;
-	}
-	// TODO: use FLOAT_RANDOM(spec)!
-	return(base + icdf((rand() + 1.0) / (RAND_MAX + 2.0), 0.0, (double)spread));
+    if(base == -1 || spread != savedspread)
+    {
+        base = -icdf(1.0 / (RAND_MAX + 2.0), 0.0, spread);
+        savedspread = spread;
+    }
+    // TODO: use FLOAT_RANDOM(spec)!
+    return(base + icdf((rand() + 1.0) / (RAND_MAX + 2.0), 0.0, (double)spread));
 }
 
 static step_num topology_choose_offset(topology_spec_t *spec)
 {
     if ((spec->model_type == COLLECTIVE_MODEL_SPREAD) ||
-    	(spec->model_type == COLLECTIVE_MODEL_REAL)) {
-    	switch (spec->model.spread_mode){
-    	case SPREAD_DISTRIBUTION_UNIFORM:
-    		return CYCLIC_RANDOM(spec, spec->model.spread_avg);
-    	case SPREAD_DISTRIBUTION_NORMAL:
-    		return gaussian_random(spec->model.spread_avg / 10, spec);
-    	}
+        (spec->model_type == COLLECTIVE_MODEL_REAL)) {
+        switch (spec->model.spread_mode){
+        case SPREAD_DISTRIBUTION_UNIFORM:
+            return CYCLIC_RANDOM(spec, spec->model.spread_avg);
+        case SPREAD_DISTRIBUTION_NORMAL:
+            return gaussian_random(spec->model.spread_avg / 10, spec);
+        }
     }
     return 0;
 }
@@ -107,18 +107,18 @@ int topology_iterator_create(topology_spec_t *spec,
     iterator->finish = 0;
     iterator->start_offset = topology_choose_offset(spec);
     if (topology_max_offset < iterator->start_offset) {
-    	topology_max_offset = iterator->start_offset;
+        topology_max_offset = iterator->start_offset;
     }
 
     memset(&iterator->in_queue, 0, sizeof(iterator->in_queue));
     if (((spec->model_type == COLLECTIVE_MODEL_NODES_MISSING) ||
-    	 (spec->model_type == COLLECTIVE_MODEL_REAL)) &&
+         (spec->model_type == COLLECTIVE_MODEL_REAL)) &&
         (spec->model.offline_fail_rate < 1.0) &&
-    	(spec->model.offline_fail_rate > FLOAT_RANDOM(spec)) &&
-		(spec->my_rank != 0)) {
+        (spec->model.offline_fail_rate > FLOAT_RANDOM(spec)) &&
+        (spec->my_rank != 0)) {
         SET_DEAD(iterator);
     } else {
-    	iterator->death_offset = NODE_IS_IMORTAL;
+        iterator->death_offset = NODE_IS_IMORTAL;
     }
 
     return ret_val;
@@ -127,58 +127,58 @@ int topology_iterator_create(topology_spec_t *spec,
 int topology_iterator_next(topology_spec_t *spec,
                            topo_funcs_t *funcs,
                            topology_iterator_t *iterator,
-						   send_list_t *global_queue,
-						   send_item_t *result)
+                           send_list_t *global_queue,
+                           send_item_t *result)
 {
-	int idx, ret;
-	step_num now = spec->step_index;
-	comm_graph_t *graph = iterator->graph;
+    int idx, ret;
+    step_num now = spec->step_index;
+    comm_graph_t *graph = iterator->graph;
     result->distance = DISTANCE_SEND_NOW + spec->latency;
 
     /* Check if time to die */
     if (now == iterator->death_offset) {
-    	SET_DEAD(iterator);
+        SET_DEAD(iterator);
 
-    	/* kill all messages waiting on his queue */
-    	result->msg      = MSG_DEATH;
-    	result->timeout  = 0;
-    	result->bitfield = BITFIELD_IGNORE_DATA;
-    	for (idx = 0; idx < iterator->in_queue.allocated; idx++) {
-    		send_item_t *stale = &iterator->in_queue.items[idx];
-    		if (stale->distance != DISTANCE_VACANT) {
-    			result->dst      = stale->src;
-    			result->src      = stale->dst;
-    			result->distance = stale->timeout - spec->step_index;
-    			ret              = global_enqueue(result, global_queue, spec->bitfield_size);
-    			if (ret != OK) {
-    				return ret;
-    			}
-    		}
-    	}
+        /* kill all messages waiting on his queue */
+        result->msg      = MSG_DEATH;
+        result->timeout  = 0;
+        result->bitfield = BITFIELD_IGNORE_DATA;
+        for (idx = 0; idx < iterator->in_queue.allocated; idx++) {
+            send_item_t *stale = &iterator->in_queue.items[idx];
+            if (stale->distance != DISTANCE_VACANT) {
+                result->dst      = stale->src;
+                result->src      = stale->dst;
+                result->distance = stale->timeout - spec->step_index;
+                ret              = global_enqueue(result, global_queue, spec->bitfield_size);
+                if (ret != OK) {
+                    return ret;
+                }
+            }
+        }
     }
 
     /* Check if already dead */
     if (IS_DEAD(iterator)) {
-    	result->distance = DISTANCE_NO_PACKET;
-    	result->dst      = DESTINATION_DEAD;
-    	return OK;
+        result->distance = DISTANCE_NO_PACKET;
+        result->dst      = DESTINATION_DEAD;
+        return OK;
     }
 
-	/* Check the input spread */
-	if (iterator->start_offset) {
-		iterator->start_offset--;
-		result->dst = DESTINATION_SPREAD;
-		graph       = NULL; /* Triggers Keep-alive-only functionality */
-	}
+    /* Check the input spread */
+    if (iterator->start_offset) {
+        iterator->start_offset--;
+        result->dst = DESTINATION_SPREAD;
+        graph       = NULL; /* Triggers Keep-alive-only functionality */
+    }
 
     return funcs->next_f(graph, &iterator->in_queue, iterator->ctx, result);
 }
 
 int topology_iterator_omit(topology_iterator_t *iterator,
-						   topo_funcs_t *funcs,
+                           topo_funcs_t *funcs,
                            tree_recovery_method_t method,
-						   node_id source,
-						   int source_is_dead)
+                           node_id source,
+                           int source_is_dead)
 {
     if (iterator->graph == current_topology) {
         iterator->graph = comm_graph_clone(current_topology);

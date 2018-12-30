@@ -237,7 +237,9 @@ int sim_coll_radix_topology(sim_spec_t *spec)
     int ret_val = OK;
     unsigned radix, max_radix;
 
-    if (spec->topology.topology.tree.radix != 0) {
+    if ((spec->topology.topology.tree.radix != 0) ||
+        (spec->topology.topology_type == COLLECTIVE_TOPOLOGY_DE_BROIJN) ||
+        (spec->topology.topology_type == COLLECTIVE_TOPOLOGY_HYPERCUBE)) {
         return sim_test(spec);
     }
 
@@ -415,8 +417,9 @@ const char HELP_STRING[] =
         "        1 - K-nomial tree\n"
         "        2 - N-ary tree, multi-root\n"
         "        3 - K-nomial tree, multi-root\n"
-//        "        4 - Recursive K-ing\n"
-        "        4 - All of the above (default)\n\n"
+        "        4 - De-broijn network\n"
+        "        5 - Hyper-Cube\n"
+        "        6 - All of the above (default)\n\n"
         "    -i|--iterations <iter-count> - Test iteration count (default: 1)\n"
         "    -p|--procs <proc-count> - Set Amount of processes to simulate"
         " (default: iterate from 2 to infinity in powers of 2)\n\n"

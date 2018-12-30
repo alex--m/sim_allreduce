@@ -16,6 +16,8 @@ typedef enum topology_type
     COLLECTIVE_TOPOLOGY_KNOMIAL_TREE,
     COLLECTIVE_TOPOLOGY_NARRAY_MULTIROOT_TREE,
     COLLECTIVE_TOPOLOGY_KNOMIAL_MULTIROOT_TREE,
+    COLLECTIVE_TOPOLOGY_DE_BROIJN,
+    COLLECTIVE_TOPOLOGY_HYPERCUBE,
     COLLECTIVE_TOPOLOGY_RECURSIVE_K_ING,
 
     COLLECTIVE_TOPOLOGY_ALL /* default, must be last */
@@ -74,6 +76,9 @@ typedef struct topology_spec
         struct {
             unsigned radix;
         } butterfly;
+        struct {
+            unsigned degree;
+        } hypercube;
     } topology;
 
     model_type_t model_type;
@@ -135,6 +140,8 @@ typedef struct topology_iterator {
 
 enum topology_map_slot {
     TREE = 0,
+    DE_BRUIJN,
+    HYPERCUBE,
     BUTTERFLY,
 
     MAX /* must be last */
