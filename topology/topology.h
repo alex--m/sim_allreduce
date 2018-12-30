@@ -65,6 +65,7 @@ typedef struct topology_spec
     step_num step_index; /* struct abuse in favor of optimization */
     step_num latency;
     int async_mode;
+    int bcast_only;
     long unsigned test_gen; /* protection from mixing packets between async. tests */
 
     topology_type_t topology_type;
@@ -108,8 +109,8 @@ typedef struct send_item {
 #define           DISTANCE_SEND_NOW    (1)
     step_num      timeout;   /* packet timeout (after which consider peer dead),
                                 after subtracting the initial send distance */
-    long unsigned test_gen;  /* protection from mixing packets between async. tests */
 #define TIMEOUT_NEVER ((step_num)-1) /* Packet does not expect a response (protocol-specific) */
+    long unsigned test_gen;  /* protection from mixing packets between async. tests */
     unsigned char *bitfield; /* pointer to the packet data - MUST BE LAST MEMBER */
 #define           BITFIELD_IGNORE_DATA (NULL)
 } send_item_t;

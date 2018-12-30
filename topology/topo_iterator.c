@@ -88,7 +88,8 @@ int topology_iterator_create(topology_spec_t *spec,
             return ret_val;
         }
 
-        if ((spec->verbose) && (!spec->async_mode)) {
+        if ((spec->verbose) && (!spec->async_mode) &&
+            (spec->topology_type < COLLECTIVE_TOPOLOGY_DE_BROIJN)) {
             comm_graph_print(current_topology);
         }
     }

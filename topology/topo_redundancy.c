@@ -20,14 +20,13 @@ int redundancy_start(topology_spec_t *spec, comm_graph_t *graph,
     internal_ctx->next_index  = 0;
     internal_ctx->my_bitfield = spec->my_bitfield;
     internal_ctx->my_peers    = graph->nodes[spec->my_rank].directions[COMM_GRAPH_CHILDREN];
+    internal_ctx->origin      = spec->my_rank == 0 ? 0 : ORIGIN_TBD;
     internal_ctx->my_rank     = spec->my_rank;
-    internal_ctx->origin      = ORIGIN_TBD;
     return OK;
 }
 
 void redundancy_stop(struct redundancy_ctx *internal_ctx)
 {
-	free(internal_ctx);
 }
 
 int redundancy_next(comm_graph_t *graph, send_list_t *in_queue,
@@ -43,7 +42,7 @@ int redundancy_next(comm_graph_t *graph, send_list_t *in_queue,
                  pkt_idx < in_queue->allocated;
                  pkt_idx++, it++) {
                 if (it->distance != DISTANCE_VACANT) {
-                    internal_ctx->origin = 0;
+                    internal_ctx->origin = it->src;
                     memcpy(result, it, sizeof(send_item_t));
                     it->distance = DISTANCE_VACANT;
                     in_queue->used--;
@@ -52,18 +51,27 @@ int redundancy_next(comm_graph_t *graph, send_list_t *in_queue,
             }
         }
 
+        result->dst      = DESTINATION_UNKNOWN;
         result->distance = DISTANCE_NO_PACKET;
         return OK;
     }
 
     if (internal_ctx->next_index == internal_ctx->my_peers->node_count) {
         // TODO: drain queue?
+        result->dst      = DESTINATION_IDLE;
+        result->distance = DISTANCE_NO_PACKET;
         return DONE;
     }
 
     /* Send to all my peers (except the origin of the data) */
     node_id next_peer = internal_ctx->my_peers->nodes[internal_ctx->next_index++];
     if (next_peer == internal_ctx->origin) {
+        if (internal_ctx->next_index == internal_ctx->my_peers->node_count) {
+            // TODO: drain queue?
+            result->dst      = DESTINATION_IDLE;
+            result->distance = DISTANCE_NO_PACKET;
+            return DONE;
+        }
         next_peer = internal_ctx->my_peers->nodes[internal_ctx->next_index++];
     }
 
@@ -71,6 +79,7 @@ int redundancy_next(comm_graph_t *graph, send_list_t *in_queue,
     result->dst      = next_peer;
     result->src      = internal_ctx->my_rank;
     result->bitfield = internal_ctx->my_bitfield;
+    result->timeout  = TIMEOUT_NEVER;
     return OK;
 }
 
@@ -96,9 +105,13 @@ int debruijn_build(topology_spec_t *spec, comm_graph_t **graph)
      */
     node_id node_count = spec->node_count;
     node_id next_id    = node_count - 1;
-    unsigned bit_count = 8 * sizeof(next_id) - __builtin_ctzl(next_id);
+    unsigned bit_count = 8 * sizeof(next_id) - __builtin_clzl(next_id);
     node_id left_bit   = 1 << (bit_count - 1);
     node_id extra_bit  = 1 << bit_count;
+
+    if (!spec->bcast_only) {
+        return ERROR;
+    }
 
     *graph = comm_graph_create(node_count, 0);
     if (!*graph) {
@@ -106,25 +119,33 @@ int debruijn_build(topology_spec_t *spec, comm_graph_t **graph)
     }
 
     for (next_id = 0; next_id < node_count; next_id++) {
-        node_id connection = (next_id >> 1) |  left_bit;
+        if (spec->verbose > 1) printf("#%lu:\t", next_id);
+
+        node_id connection = (next_id >> 1) | left_bit;
         if ((connection != next_id) && (connection < node_count)) {
+            if (spec->verbose > 1) printf("%lu,", connection);
             comm_graph_append(*graph, next_id, connection, COMM_GRAPH_CHILDREN);
         }
 
         connection = (next_id >> 1) & ~left_bit;
         if ((connection != next_id) && (connection < node_count)) {
+            if (spec->verbose > 1) printf("%lu,", connection);
             comm_graph_append(*graph, next_id, connection, COMM_GRAPH_CHILDREN);
         }
 
         connection =  ((next_id << 1) | 1) & ~extra_bit;
         if ((connection != next_id) && (connection < node_count)) {
+            if (spec->verbose > 1) printf("%lu,", connection);
             comm_graph_append(*graph, next_id, connection, COMM_GRAPH_CHILDREN);
         }
 
         connection = (next_id << 1) & ~1 & ~extra_bit;
         if ((connection != next_id) && (connection < node_count)) {
+            if (spec->verbose > 1) printf("%lu,", connection);
             comm_graph_append(*graph, next_id, connection, COMM_GRAPH_CHILDREN);
         }
+
+        if (spec->verbose > 1) printf("\n");
     }
 
     return OK;
@@ -144,8 +165,12 @@ int hypercube_build(topology_spec_t *spec, comm_graph_t **graph)
      */
     node_id node_count = spec->node_count;
     node_id next_id    = node_count - 1;
-    unsigned bit_count = 8 * sizeof(next_id) - __builtin_ctzl(next_id);
+    unsigned bit_count = 8 * sizeof(next_id) - __builtin_clzl(next_id);
     unsigned next_bit;
+
+    if (!spec->bcast_only) {
+        return ERROR;
+    }
 
     *graph = comm_graph_create(node_count, 0);
     if (!*graph) {
@@ -153,17 +178,26 @@ int hypercube_build(topology_spec_t *spec, comm_graph_t **graph)
     }
 
     for (next_id = 0; next_id < node_count; next_id++) {
+        if (spec->verbose > 1) printf("#%lu:\t", next_id);
+
         for (next_bit = 0; next_bit < bit_count; next_bit++) {
             node_id connection = next_id | (1 << next_bit);
             if ((connection != next_id) && (connection < node_count)) {
-                comm_graph_append(*graph, next_id, connection, COMM_GRAPH_CHILDREN);
-            }
-
-            connection = next_id & ~(1 << next_bit);
-            if ((connection != next_id) && (connection < node_count)) {
+                if (spec->verbose > 1) printf("%lu,", connection);
                 comm_graph_append(*graph, next_id, connection, COMM_GRAPH_CHILDREN);
             }
         }
+
+        /* Separate loops, to improve node ordering in a broadcast */
+        for (next_bit = 0; next_bit < bit_count; next_bit++) {
+            node_id connection = next_id & ~(1 << next_bit);
+            if ((connection != next_id) && (connection < node_count)) {
+                if (spec->verbose > 1) printf("%lu,", connection);
+                comm_graph_append(*graph, next_id, connection, COMM_GRAPH_CHILDREN);
+            }
+        }
+
+        if (spec->verbose > 1) printf("\n");
     }
 
     return OK;

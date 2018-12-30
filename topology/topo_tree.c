@@ -86,6 +86,7 @@ struct order tree_order[] = {
 
         /* rank #0 only - wait for everybody */
         {COMM_GRAPH_EXCLUDE,        TREE_WAIT_ROOT},/* Death -> goto COMM_GRAPH_EXTRA_FATHERS, zero send_idx */
+#define ORDER_BCAST (4)
 
         /* Next - wait for results (for verbose mode) */
         {COMM_GRAPH_FATHERS,        TREE_RECV},/* Death -> goto COMM_GRAPH_EXTRA_FATHERS, zero send_idx */
@@ -181,6 +182,9 @@ int tree_start(topology_spec_t *spec, comm_graph_t *graph, tree_context_t *ctx)
     ctx->graph = graph;
     ctx->service_method = spec->model.service_mode;
     ctx->my_node = &ctx->graph->nodes[ctx->my_rank];
+    if (spec->bcast_only) {
+        ctx->order_indicator = ORDER_BCAST;
+    }
 
     ctx->contacts_used =
             my_node->directions[COMM_GRAPH_FATHERS]->node_count +

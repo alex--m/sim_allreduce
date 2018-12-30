@@ -6,7 +6,7 @@
         void *tmp; \
         node->directions[direction]->arr_length *= 2; \
         tmp = realloc(node->directions[direction], sizeof(comm_graph_direction_t) \
-                + (node->directions[direction]->arr_length * sizeof(node_id))); \
+                + ((node->directions[direction]->arr_length - 1) * sizeof(node_id))); \
         if (!tmp) { \
             return -1; \
         } \

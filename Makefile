@@ -1,2 +1,2 @@
 all:
-	~/workspace/ompi/build/bin/mpicc `find . -name '*.c'` -lm -o sim_allreduce
+	~/workspace/ompi/build/bin/mpicc `find . -name '*.c'` -g -lm -o sim_allreduce

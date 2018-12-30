@@ -436,6 +436,7 @@ const char HELP_STRING[] =
         "    -a|--spread-avg <iterations> - Set average spread between processes"
 		" (default: iterate from sqrt(procs) to procs in powers of 2)\n\n"
         "    -l|--latency <iterations> - Set the message delivery latency (default: 10)\n\n"
+        "    -b|--bcast-only - Broadcast instead of Allreduce"
         "";
 
 int sim_coll_parse_args(int argc, char **argv, sim_spec_t *spec)
@@ -457,10 +458,11 @@ int sim_coll_parse_args(int argc, char **argv, sim_spec_t *spec)
 				{"service-mode",   required_argument, 0, 'q' }, // TODO: usage
                 {"radix",          required_argument, 0, 'r' },
                 {"spread-mode",    required_argument, 0, 's' },
+                {"bcast-only",     no_argument,       0, 'b' },
                 {0,                0,                 0,  0  },
         };
 
-        c = getopt_long(argc, argv, "hvxm:t:p:r:c:f:o:l:s:a:i:q:",
+        c = getopt_long(argc, argv, "hbvxm:t:p:r:c:f:o:l:s:a:i:q:",
                 long_options, &option_index);
         if (c == -1)
             break;
@@ -523,6 +525,10 @@ int sim_coll_parse_args(int argc, char **argv, sim_spec_t *spec)
 
         case 'i':
             spec->test_count = atoi(optarg);
+            break;
+
+        case 'b':
+            spec->topology.bcast_only = 1;
             break;
 
         case 'x':
