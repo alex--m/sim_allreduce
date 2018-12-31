@@ -60,7 +60,7 @@ int sim_test_iteration(sim_spec_t *spec, raw_stats_t *stats)
     spec->topology.test_gen++;
 
     if (spec->topology.async_mode) {
-    	return sim_fast_tree(&spec->topology, stats);
+        return sim_fast_tree(&spec->topology, stats);
     }
 
     /* Create a new state for this iteration of the test */
@@ -71,27 +71,27 @@ int sim_test_iteration(sim_spec_t *spec, raw_stats_t *stats)
 
     /* Run until everybody completes (unlimited) */
     while (ret_val == OK) {
-    	ret_val = state_next_step(spec->state);
-    	if (spec->topology.async_mode) {
-    		if ((ret_val == DONE) || (spec->mpi_rank == 0)) {
-				int is_done = 0;
-    			if (!barrier) {
-    				MPI_Ibarrier(MPI_COMM_WORLD, &barrier);
-    			}
-    			MPI_Test(&barrier, &is_done, MPI_STATUS_IGNORE);
-    			ret_val = is_done ? DONE : OK;
-    		}
-    	} else {
-    		spec->topology.step_index++;
-    		/* Sanity check: make sure we're not stuck indefinitely! */
-    		if (spec->node_count * 1000 < spec->topology.step_index) {
-    			return ERROR;
-    		}
-    	}
+        ret_val = state_next_step(spec->state);
+        if (spec->topology.async_mode) {
+            if ((ret_val == DONE) || (spec->mpi_rank == 0)) {
+                int is_done = 0;
+                if (!barrier) {
+                    MPI_Ibarrier(MPI_COMM_WORLD, &barrier);
+                }
+                MPI_Test(&barrier, &is_done, MPI_STATUS_IGNORE);
+                ret_val = is_done ? DONE : OK;
+            }
+        } else {
+            spec->topology.step_index++;
+            /* Sanity check: make sure we're not stuck indefinitely! */
+            if (spec->node_count * 1000 < spec->topology.step_index) {
+                return ERROR;
+            }
+        }
     }
 
     if (ret_val != DONE) {
-    	return ret_val;
+        return ret_val;
     }
 
     return state_get_raw_stats(spec->state, stats);
@@ -109,19 +109,19 @@ int sim_test(sim_spec_t *spec)
 
     /* Distribute tests among processes */
     if (spec->topology.async_mode) {
-    	my_test_count = total_test_count;
+        my_test_count = total_test_count;
     } else {
         /* no need to collect statistics on deterministic algorithms */
         if (spec->topology.model_type == COLLECTIVE_MODEL_BASE) {
             total_test_count = 1;
         }
 
-    	if (is_root) {
-    		my_test_count = (total_test_count / spec->mpi_size) +
-    				(total_test_count % spec->mpi_size);
-    	} else {
-    		my_test_count = total_test_count / spec->mpi_size;
-    	}
+        if (is_root) {
+            my_test_count = (total_test_count / spec->mpi_size) +
+                    (total_test_count % spec->mpi_size);
+        } else {
+            my_test_count = total_test_count / spec->mpi_size;
+        }
     }
 
     /* Prepare for subsequent test iterations */
@@ -142,15 +142,15 @@ int sim_test(sim_spec_t *spec)
         ret_val = sim_test_iteration(spec, &raw);
 
         if (ret_val == OK) {
-        	/* Collect statistics */
-        	stats_calc(&spec->steps,      raw.last_step_counter);
-        	stats_calc(&spec->in_spread,  topology_max_offset);
-        	stats_calc(&spec->out_spread, raw.last_step_counter - raw.first_step_counter);
-        	stats_calc(&spec->data,       raw.data_len_counter);
-        	stats_calc(&spec->msgs,       raw.messages_counter / spec->node_count);
-        	stats_calc(&spec->queue,      raw.max_queueu_len);
-        	stats_calc(&spec->dead,       raw.death_toll);
-        	topology_max_offset = 0;
+            /* Collect statistics */
+            stats_calc(&spec->steps,      raw.last_step_counter);
+            stats_calc(&spec->in_spread,  topology_max_offset);
+            stats_calc(&spec->out_spread, raw.last_step_counter - raw.first_step_counter);
+            stats_calc(&spec->data,       raw.data_len_counter);
+            stats_calc(&spec->msgs,       raw.messages_counter / spec->node_count);
+            stats_calc(&spec->queue,      raw.max_queueu_len);
+            stats_calc(&spec->dead,       raw.death_toll);
+            topology_max_offset = 0;
         }
     }
 
@@ -173,11 +173,11 @@ int sim_test(sim_spec_t *spec)
                     spec->topology.topology_type,
                     spec->topology.topology.tree.radix,
                     spec->topology.model.spread_avg,
-					spec->topology.model.offline_fail_rate,
-					spec->topology.model.online_fail_rate,
-					spec->steps.cnt ? spec->steps.sum / spec->steps.cnt : 0,
-					spec->in_spread.cnt ? spec->in_spread.sum / spec->in_spread.cnt : 0,
-					spec->queue.max);
+                    spec->topology.model.offline_fail_rate,
+                    spec->topology.model.online_fail_rate,
+                    spec->steps.cnt ? spec->steps.sum / spec->steps.cnt : 0,
+                    spec->in_spread.cnt ? spec->in_spread.sum / spec->in_spread.cnt : 0,
+                    spec->queue.max);
         } else {
             printf("%lu,%u,%u,%u,%u,%lu,%.2f,%.2f,%u",
                     spec->node_count,
@@ -186,8 +186,8 @@ int sim_test(sim_spec_t *spec)
                     spec->topology.topology.tree.radix,
                     spec->topology.model.spread_mode,
                     spec->topology.model.spread_avg,
-					spec->topology.model.offline_fail_rate,
-					spec->topology.model.online_fail_rate,
+                    spec->topology.model.offline_fail_rate,
+                    spec->topology.model.online_fail_rate,
                     total_test_count);
             stats_print(&spec->steps);
             stats_print(&spec->in_spread);
@@ -318,8 +318,8 @@ int sim_coll_model_nodes_missing(sim_spec_t *spec)
 
     for (index = 1;
          ((index <= 100) &&
-    	  (index < (spec->node_count / 10)) &&
-		  (ret_val == OK));
+          (index < (spec->node_count / 10)) &&
+          (ret_val == OK));
          index *= 10) {
         spec->topology.model.offline_fail_rate = index;
         ret_val = sim_coll_topology(spec);
@@ -340,8 +340,8 @@ int sim_coll_model_nodes_failing(sim_spec_t *spec)
 
     for (index = 1;
          ((index <= 100) &&
-    	  (index < (spec->node_count / 10)) &&
-		  (ret_val == OK));
+          (index < (spec->node_count / 10)) &&
+          (ret_val == OK));
          index *= 10) {
         spec->topology.model.online_fail_rate = index;
         ret_val = sim_coll_model_nodes_missing(spec);
@@ -367,9 +367,9 @@ int sim_coll_model_vars(sim_spec_t *spec)
         return sim_coll_model_nodes_failing(spec);
 
     case COLLECTIVE_MODEL_REAL:
-    	if (spec->topology.model.spread_avg == 0) {
-    		spec->topology.model.spread_avg = sqrt(spec->node_count);
-    	}
+        if (spec->topology.model.spread_avg == 0) {
+            spec->topology.model.spread_avg = sqrt(spec->node_count);
+        }
         return sim_coll_model_nodes_failing(spec);
 
     default:
@@ -412,6 +412,8 @@ const char HELP_STRING[] =
         "        2 - Missing nodes (\"inactive\", uniform distribution))\n"
         "        3 - Failing nodes (\"online failure\", uniform distribution))\n"
         "        4 - All of the above (default)\n\n"
+        "    -f|--inactive-rate <rate> - Rate (0<rate<1.0) or number (rate>=1.0) of inactive nodes.\n\n"
+        "    -o|--fault-rate <rate> - Rate (0<rate<1.0) or number (rate>=1.0) of faults.\n\n"
         "    -t|--topology <collective-topology>\n"
         "        0 - N-ary tree\n"
         "        1 - K-nomial tree\n"
@@ -421,7 +423,7 @@ const char HELP_STRING[] =
         "        5 - De-broijn network\n"
         "        6 - Hyper-Cube\n"
         "        7 - All of the above (default)\n\n"
-        "    -i|--iterations <iter-count> - Test iteration count (default: 1)\n"
+        "    -i|--iterations <iter-count> - Test iteration count (default: 1)\n\n"
         "    -p|--procs <proc-count> - Set Amount of processes to simulate"
         " (default: iterate from 2 to infinity in powers of 2)\n\n"
         "    -r|--radix <tree-radix> - Set tree radix for tree-based topologies"
@@ -429,14 +431,19 @@ const char HELP_STRING[] =
         "    -c|--recovery <recovery-method> - Set the method for tree fault recovery:\n"
         "        0 - Fall back to fathers, up the tree\n"
         "        1 - Fall back to brothers, across the tree\n"
-        "        2 - All of the above (default)\n\n"
+        "        2 - Fall back to whoever has already been reached\n"
+        "        3 - Disregard faults, rely on the topology for tolerance\n"
+        "        4 - Try each of the above (default)\n\n"
         "    -s|--spread-mode <recovery-method> - Set the method to generate random spread:\n"
         "        0 - Uniform function (default)\n"
         "        1 - Normal distribution\n\n"
+        "    -q|--service-mode <distance-method> - Set the service distance function (see paper):\n"
+        "        0 - Randomized Service Distance (RSD) function (default)\n"
+        "        1 - Determenistic Interval Service Distance (DISD) function\n\n"
         "    -a|--spread-avg <iterations> - Set average spread between processes"
-		" (default: iterate from sqrt(procs) to procs in powers of 2)\n\n"
+        " (default: iterate from sqrt(procs) to procs in powers of 2)\n\n"
         "    -l|--latency <iterations> - Set the message delivery latency (default: 10)\n\n"
-        "    -b|--bcast-only - Broadcast instead of Allreduce"
+        "    -b|--bcast-only - Broadcast instead of Allreduce\n\n"
         "";
 
 int sim_coll_parse_args(int argc, char **argv, sim_spec_t *spec)
@@ -448,14 +455,14 @@ int sim_coll_parse_args(int argc, char **argv, sim_spec_t *spec)
         static struct option long_options[] = {
                 {"spread-avg",     required_argument, 0, 'a' },
                 {"recovery",       required_argument, 0, 'c' },
-                {"fail-rate",      required_argument, 0, 'f' }, // TODO: usage
+                {"inactive-rate",  required_argument, 0, 'f' },
+                {"fault-rate",     required_argument, 0, 'o' },
                 {"iterations",     required_argument, 0, 'i' },
                 {"latency",        required_argument, 0, 'l' },
                 {"model",          required_argument, 0, 'm' },
                 {"topology",       required_argument, 0, 't' },
-				{"online-fails",   required_argument, 0, 'o' }, // TODO: usage
                 {"procs",          required_argument, 0, 'p' },
-				{"service-mode",   required_argument, 0, 'q' }, // TODO: usage
+                {"service-mode",   required_argument, 0, 'q' },
                 {"radix",          required_argument, 0, 'r' },
                 {"spread-mode",    required_argument, 0, 's' },
                 {"bcast-only",     no_argument,       0, 'b' },
@@ -516,12 +523,12 @@ int sim_coll_parse_args(int argc, char **argv, sim_spec_t *spec)
             break;
 
         case 'f':
-        	spec->topology.model.offline_fail_rate = atof(optarg);
-        	break;
+            spec->topology.model.offline_fail_rate = atof(optarg);
+            break;
 
         case 'o':
-        	spec->topology.model.online_fail_rate = atof(optarg);
-        	break;
+            spec->topology.model.online_fail_rate = atof(optarg);
+            break;
 
         case 'i':
             spec->test_count = atoi(optarg);
@@ -532,10 +539,10 @@ int sim_coll_parse_args(int argc, char **argv, sim_spec_t *spec)
             break;
 
         case 'x':
-        	spec->topology.async_mode = 1;
-        	spec->node_count = spec->mpi_size;
+            spec->topology.async_mode = 1;
+            spec->node_count = spec->mpi_size;
             spec->topology.latency = 0;
-        	break;
+            break;
 
         case 'v':
             spec->topology.verbose++;
@@ -591,27 +598,27 @@ int main(int argc, char **argv)
     }
 
     if (spec.mpi_rank == 0) {
-    	if (spec.topology.verbose) {
-    		printf("Execution specification:\n"
-    				"model=%i "
-    				"topology=%i "
-    				"test_count=%i "
-    				"tree_radix=%i "
-    				"latency=%lu "
-    				"random-seed=%i\n",
-					spec.topology.model_type,
-					spec.topology.topology_type,
-					spec.test_count,
-					spec.topology.topology.tree.radix,
-					spec.topology.latency,
-					spec.topology.random_seed);
-    	} else {
-    		/* CSV header */
-    		printf("np,model,topo,radix,spread_mode,spread_avg,off-fail,on-fail,runs,"
-    				"min_steps,max_steps,steps_avg,min_in_spread,max_in_spread,in_spread_avg,min_out_spread,max_out_spread,out_spread_avg,"
-    				"min_msgs,max_msgs,msgs_avg,min_data,max_data,data_avg,min_queue,max_queue,queue_avg,"
-    				"min_dead,max_dead,dead_avg\n");
-    	}
+        if (spec.topology.verbose) {
+            printf("Execution specification:\n"
+                   "model=%i "
+                   "topology=%i "
+                   "test_count=%i "
+                   "tree_radix=%i "
+                   "latency=%lu "
+                   "random-seed=%i\n",
+                   spec.topology.model_type,
+                   spec.topology.topology_type,
+                   spec.test_count,
+                   spec.topology.topology.tree.radix,
+                   spec.topology.latency,
+                   spec.topology.random_seed);
+        } else {
+            /* CSV header */
+            printf("np,model,topo,radix,spread_mode,spread_avg,off-fail,on-fail,runs,"
+                   "min_steps,max_steps,steps_avg,min_in_spread,max_in_spread,in_spread_avg,min_out_spread,max_out_spread,out_spread_avg,"
+                   "min_msgs,max_msgs,msgs_avg,min_data,max_data,data_avg,min_queue,max_queue,queue_avg,"
+                   "min_dead,max_dead,dead_avg\n");
+        }
     }
 
     if (spec.node_count) {

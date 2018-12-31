@@ -84,8 +84,11 @@ int redundancy_next(comm_graph_t *graph, send_list_t *in_queue,
 }
 
 int redundancy_fix(comm_graph_t *graph, void *internal_ctx,
-		          tree_recovery_method_t recovery, node_id broken)
+                  tree_recovery_method_t recovery, node_id broken)
 {
+    if (recovery != COLLECTIVE_RECOVERY_DISREGARD) {
+        return ERROR;
+    }
     return OK;
 }
 

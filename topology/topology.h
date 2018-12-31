@@ -50,6 +50,7 @@ typedef enum tree_recovery_method
     COLLECTIVE_RECOVERY_FATHER_FIRST = 0,
     COLLECTIVE_RECOVERY_BROTHER_FIRST,
     COLLECTIVE_RECOVERY_CATCH_THE_BUS,
+    COLLECTIVE_RECOVERY_DISREGARD,
 
     COLLECTIVE_RECOVERY_ALL /* default, must be last */
 } tree_recovery_method_t;

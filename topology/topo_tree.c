@@ -834,6 +834,10 @@ int tree_fix(comm_graph_t *graph, tree_context_t *ctx,
              tree_recovery_method_t recovery,
              node_id source, int source_is_dead)
 {
+    if (recovery != COLLECTIVE_RECOVERY_FATHER_FIRST) {
+        return ERROR;
+    }
+
     int is_father_dead;
     //printf("\nOMIT: %lu asked %lu to omit... (itself? %i)\n", source, me, source_is_dead);
     int ret = tree_fix_graph(ctx, graph, ctx->my_rank, recovery, source,
