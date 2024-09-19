@@ -99,7 +99,7 @@ if __name__ == "__main__":
         if not procs and len(sys.argv) > 2:
             steps = int(sys.argv[2])
     else:
-        print "USAGE: bounds.py <#procs> [<#steps-if-procs=0>]"
+        print("USAGE: bounds.py <#procs> [<#steps-if-procs=0>]")
         exit(1)
 
     for k in range(1, 21):
@@ -108,9 +108,9 @@ if __name__ == "__main__":
         step = 0
         radixes = []
         while True:
-            print step, steps, radix(step, k)
+            print(step, steps, radix(step, k))
             if (radix(step, k) >= procs) or (steps and step == steps):
-                print "Optimal N-ary multi-root tree bound for radix=%i:\t%i steps." % (k, step)
+                print("Optimal N-ary multi-root tree bound for radix=%i:\t%i steps." % (k, step))
                 break
             step += 1
 
@@ -118,7 +118,7 @@ if __name__ == "__main__":
         optimals = []
         while True:
             if (optimal(step, k) >= procs) or (steps and step == steps):
-                print "Optimal multi-root tree bound for radix=%i:\t\t%i steps." % (k, step)
+                print("Optimal multi-root tree bound for radix=%i:\t\t%i steps." % (k, step))
                 break
             step += 1
 
@@ -126,7 +126,6 @@ if __name__ == "__main__":
         nomials = {}
         while True:
             if (knomial(step, k) >= procs) or (steps and step == steps):
-                print "K-nomial multi-root tree bound for radix=%i:\t\t%i steps." % (k, step)
+                print("K-nomial multi-root tree bound for radix=%i:\t\t%i steps." % (k, step))
                 break
             step += 1
-        print
