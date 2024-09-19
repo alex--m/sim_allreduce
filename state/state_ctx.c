@@ -250,7 +250,7 @@ int state_create(topology_spec_t *spec, state_t *old_state, state_t **new_state)
         }
 
         /* For broadcast-only mode - start from a full node #0 */
-        if (spec->bcast_only) {
+        if (spec->collective == COLLECTIVE_TYPE_BROADCAST) {
             SET_FULL(ctx, 0);
         }
     }
@@ -531,7 +531,8 @@ int state_next_step(state_t *state)
     } else {
         idx          = 0;
         cnt          = state->spec->node_count;
-        active_count = spec->node_count - 1 + spec->bcast_only;
+        active_count = spec->node_count - 1 +
+                       (spec->collective == COLLECTIVE_TYPE_BROADCAST);
     }
 
     for (; idx < cnt; idx++) {
@@ -649,8 +650,15 @@ int state_next_step(state_t *state)
                 }
             }
         }
+
         return DONE;
     }
+
+    /* For reduce-only mode - finish when node #0 is full */
+    if ((state->spec->collective == COLLECTIVE_TYPE_REDUCE) && IS_FULL(state, 0)) {
+        return DONE;
+    }
+
     return OK;
 }
 

@@ -112,7 +112,7 @@ int debruijn_build(topology_spec_t *spec, comm_graph_t **graph)
     node_id left_bit   = 1 << (bit_count - 1);
     node_id extra_bit  = 1 << bit_count;
 
-    if (!spec->bcast_only) {
+    if (spec->collective != COLLECTIVE_TYPE_BROADCAST) {
         return ERROR;
     }
 
@@ -171,7 +171,7 @@ int hypercube_build(topology_spec_t *spec, comm_graph_t **graph)
     unsigned bit_count = 8 * sizeof(next_id) - __builtin_clzl(next_id);
     unsigned next_bit;
 
-    if (!spec->bcast_only) {
+    if (spec->collective != COLLECTIVE_TYPE_BROADCAST) {
         return ERROR;
     }
 

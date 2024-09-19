@@ -46,23 +46,23 @@ struct order {
     action_e action;
 } fast_tree_order[] = {
 		/* First - wait for children */
-        {COMM_GRAPH_CHILDREN,       WORK_ACTION_RECV},/* Death -> nothing */
-        {COMM_GRAPH_EXTRA_CHILDREN, WORK_ACTION_RECV},/* Death -> nothing */
+		{COMM_GRAPH_CHILDREN,       WORK_ACTION_RECV},/* Death -> nothing */
+		{COMM_GRAPH_EXTRA_CHILDREN, WORK_ACTION_RECV},/* Death -> nothing */
 
 		/* Then - send to fathers (up the tree) */
-        {COMM_GRAPH_FATHERS,        WORK_ACTION_SEND},/* Death -> zero send_idx */
-        {COMM_GRAPH_EXTRA_FATHERS,  WORK_ACTION_SEND},/* Death -> zero send_idx */
+		{COMM_GRAPH_FATHERS,        WORK_ACTION_SEND},/* Death -> zero send_idx */
+		{COMM_GRAPH_EXTRA_FATHERS,  WORK_ACTION_SEND},/* Death -> zero send_idx */
 
 		/* Next - wait for results (for verbose mode) */
-        {COMM_GRAPH_FATHERS,        WORK_ACTION_RECV},/* Death -> goto COMM_GRAPH_EXTRA_FATHERS, zero send_idx */
-        {COMM_GRAPH_EXTRA_FATHERS,  WORK_ACTION_RECV},/* Death -> goto COMM_GRAPH_EXTRA_FATHERS, zero send_idx */
+		{COMM_GRAPH_FATHERS,        WORK_ACTION_RECV},/* Death -> goto COMM_GRAPH_EXTRA_FATHERS, zero send_idx */
+		{COMM_GRAPH_EXTRA_FATHERS,  WORK_ACTION_RECV},/* Death -> goto COMM_GRAPH_EXTRA_FATHERS, zero send_idx */
 
 		/* Finally - send to children (down the tree) */
 		{COMM_GRAPH_CHILDREN,       WORK_ACTION_SEND},/* Death -> zero send_idx */
-        {COMM_GRAPH_EXTRA_CHILDREN, WORK_ACTION_SEND},/* Death -> zero send_idx */
+		{COMM_GRAPH_EXTRA_CHILDREN, WORK_ACTION_SEND},/* Death -> zero send_idx */
 
 		/* DONE */
-        {COMM_GRAPH_EXCLUDE,        WORK_ACTION_DONE}
+		{COMM_GRAPH_EXCLUDE,        WORK_ACTION_DONE}
 };
 
 static inline int fast_tree_recv(struct pkt *incoming, node_id *sender, unsigned tag)

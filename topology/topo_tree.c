@@ -182,7 +182,7 @@ int tree_start(topology_spec_t *spec, comm_graph_t *graph, tree_context_t *ctx)
     ctx->graph = graph;
     ctx->service_method = spec->model.service_mode;
     ctx->my_node = &ctx->graph->nodes[ctx->my_rank];
-    if (spec->bcast_only) {
+    if (spec->collective == COLLECTIVE_TYPE_BROADCAST) {
         ctx->order_indicator = ORDER_BCAST;
     }
 

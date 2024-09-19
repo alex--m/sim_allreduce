@@ -40,6 +40,12 @@ typedef enum spread_distribution_type {
 	SPREAD_DISTRIBUTION_NORMAL
 } spread_distribution_type_t;
 
+typedef enum collective_type {
+	COLLECTIVE_TYPE_ALLREDUCE = 0,
+	COLLECTIVE_TYPE_BROADCAST,
+	COLLECTIVE_TYPE_REDUCE
+} collective_type_t;
+
 typedef enum tree_service_cycle_method {
 	TREE_SERVICE_CYCLE_RANDOM = 0,
 	TREE_SERVICE_CYCLE_CALC
@@ -66,7 +72,7 @@ typedef struct topology_spec
     step_num step_index; /* struct abuse in favor of optimization */
     step_num latency;
     int async_mode;
-    int bcast_only;
+    collective_type_t collective;
     long unsigned test_gen; /* protection from mixing packets between async. tests */
 
     topology_type_t topology_type;
