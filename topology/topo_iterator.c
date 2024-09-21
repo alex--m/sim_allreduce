@@ -106,6 +106,7 @@ int topology_iterator_create(topology_spec_t *spec,
 
     /* Set the rest of the context */
     iterator->finish = 0;
+    iterator->waiting_count = 0;
     iterator->start_offset = topology_choose_offset(spec);
     if (topology_max_offset < iterator->start_offset) {
         topology_max_offset = iterator->start_offset;
@@ -172,7 +173,15 @@ int topology_iterator_next(topology_spec_t *spec,
         graph       = NULL; /* Triggers Keep-alive-only functionality */
     }
 
-    return funcs->next_f(graph, &iterator->in_queue, iterator->ctx, result);
+    ret = funcs->next_f(graph, &iterator->in_queue, iterator->ctx, result);
+
+    if ((now > topology_max_offset) && (ret == OK) &&
+        (result->distance != DISTANCE_NO_PACKET) &&
+        ((result->msg % 3) == 0) /* Tree DATA, no Keep-alives */) {
+            iterator->waiting_count = now - topology_max_offset;
+    }
+
+    return ret;
 }
 
 int topology_iterator_omit(topology_iterator_t *iterator,

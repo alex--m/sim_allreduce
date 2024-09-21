@@ -143,6 +143,7 @@ typedef struct topology_iterator {
 #define          NODE_IS_DEAD    ((step_num)-1)
 #define          NODE_IS_IMORTAL ((step_num)-2)
 
+    step_num     waiting_count; /* Steps from last arrival to the end of the collective */
     step_num     finish;        /* When did this node "leave" the collective */
     char         ctx[0];        /* internal context, type depends on topology */
 } topology_iterator_t;

@@ -32,6 +32,7 @@ typedef struct sim_spec
     stats_t msgs;
     stats_t queue;
     stats_t dead;
+    stats_t waiting;
 } sim_spec_t;
 
 /*****************************************************************************\
@@ -133,6 +134,7 @@ int sim_test(sim_spec_t *spec)
     memset(&spec->msgs,       0, sizeof(stats_t));
     memset(&spec->queue,      0, sizeof(stats_t));
     memset(&spec->dead,       0, sizeof(stats_t));
+    memset(&spec->waiting,    0, sizeof(stats_t));
 
     for (test_index = 0;
          ((test_index < my_test_count) && (ret_val == OK));
@@ -150,6 +152,7 @@ int sim_test(sim_spec_t *spec)
             stats_calc(&spec->msgs,       raw.messages_counter / spec->node_count);
             stats_calc(&spec->queue,      raw.max_queueu_len);
             stats_calc(&spec->dead,       raw.death_toll);
+            stats_calc(&spec->waiting,    raw.waiting_counter);
             topology_max_offset = 0;
         }
     }
@@ -163,6 +166,7 @@ int sim_test(sim_spec_t *spec)
         stats_aggregate(&spec->msgs,       is_root);
         stats_aggregate(&spec->queue,      is_root);
         stats_aggregate(&spec->dead,       is_root);
+        stats_aggregate(&spec->waiting,    is_root);
     }
 
     if (is_root) {
@@ -196,6 +200,7 @@ int sim_test(sim_spec_t *spec)
             stats_print(&spec->data);
             stats_print(&spec->queue);
             stats_print(&spec->dead);
+            stats_print(&spec->waiting);
             if (ret_val != OK) {
                 printf(" - ERROR!");
             }
@@ -623,7 +628,7 @@ int main(int argc, char **argv)
             printf("np,model,topo,radix,spread_mode,spread_avg,off-fail,on-fail,runs,"
                    "min_steps,max_steps,steps_avg,min_in_spread,max_in_spread,in_spread_avg,min_out_spread,max_out_spread,out_spread_avg,"
                    "min_msgs,max_msgs,msgs_avg,min_data,max_data,data_avg,min_queue,max_queue,queue_avg,"
-                   "min_dead,max_dead,dead_avg\n");
+                   "min_dead,max_dead,dead_avg,min_wait,max_wait,wait_avg\n");
         }
     }
 
@@ -644,8 +649,6 @@ int main(int argc, char **argv)
     if (spec.mpi_rank == 0) {
         if (ret_val != OK) {
             printf("Failure stopped the run!\n");
-        } else {
-            printf("Run completed successfully!\n");
         }
     }
 

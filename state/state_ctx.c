@@ -502,12 +502,13 @@ extern step_num topology_max_offset;
 int state_next_step(state_t *state)
 {
     int ret_val;
-    node_id idx, cnt;
     send_item_t res;
+    node_id idx, cnt;
+    node_id active_count;
+    topology_iterator_t *iterator;
     node_id dead_count    = 0;
     topology_spec_t *spec = state->spec;
     topo_funcs_t *funcs   = state->funcs;
-    node_id active_count;
 
     /* Deliver queued packets */
     ret_val = state_dequeue(state);
@@ -537,7 +538,9 @@ int state_next_step(state_t *state)
 
     for (; idx < cnt; idx++) {
         node_id local_rank = (state->spec->async_mode) ? 0 : idx;
-        topology_iterator_t *iterator = GET_ITERATOR(state, local_rank);
+        iterator           = GET_ITERATOR(state, local_rank);
+
+        spec->my_rank = local_rank; // TODO: remove
 
         if (IS_DEAD(iterator)) {
             res.distance = DISTANCE_NO_PACKET;
@@ -623,8 +626,21 @@ int state_next_step(state_t *state)
         }
     }
 
-    if ((active_count - dead_count) == 0) {
-        topology_iterator_t *iterator   = GET_ITERATOR(state, 0);
+    if (((active_count - dead_count) == 0) ||
+        ((state->spec->collective == COLLECTIVE_TYPE_REDUCE) &&
+         IS_FULL(state, 0))) {
+        state->stats.waiting_counter = 0;
+        for (idx = 0; idx < cnt; idx++) {
+            iterator = GET_ITERATOR(state, idx);
+            if (!IS_DEAD(iterator)) {
+                if ((idx == 0) && (state->spec->collective == COLLECTIVE_TYPE_REDUCE)) {
+                    iterator->waiting_count++;
+                }
+                state->stats.waiting_counter += iterator->waiting_count / 2;
+            }
+        }
+
+        iterator                        = GET_ITERATOR(state, 0);
         state->stats.max_queueu_len     = iterator->in_queue.max;
         state->stats.first_step_counter = state->spec->step_index;
         state->stats.last_step_counter  = state->spec->step_index;
@@ -651,11 +667,6 @@ int state_next_step(state_t *state)
             }
         }
 
-        return DONE;
-    }
-
-    /* For reduce-only mode - finish when node #0 is full */
-    if ((state->spec->collective == COLLECTIVE_TYPE_REDUCE) && IS_FULL(state, 0)) {
         return DONE;
     }
 
