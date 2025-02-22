@@ -68,7 +68,7 @@ static step_num topology_choose_offset(topology_spec_t *spec)
         case SPREAD_DISTRIBUTION_UNIFORM:
             return CYCLIC_RANDOM(spec, spec->model.spread_avg);
         case SPREAD_DISTRIBUTION_NORMAL:
-            return gaussian_random(spec->model.spread_avg / 10, spec);
+            return gaussian_random(sqrt(spec->model.spread_avg), spec);
         }
     }
     return 0;
