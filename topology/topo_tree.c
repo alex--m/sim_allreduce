@@ -660,6 +660,9 @@ service_distance:
         assert(result->src != ctx->my_rank);
         return OK;
     }
+    if (ctx->service_method == TREE_SERVICE_NONE) {
+        goto skip_keepalives;
+    }
 
     // TODO: move to after step 5??
     /* Step #4: If its time is up - send a keep-alive within service-distance */
@@ -679,6 +682,7 @@ service_distance:
         return OK;
     }
 
+skip_keepalives:
     /* Step #6: Service any other distance (arbitrary) */
     if (distance != ANY_DISTANCE) {
         distance = ANY_DISTANCE;

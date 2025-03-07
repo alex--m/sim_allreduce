@@ -43,21 +43,26 @@ double NormalCDFInverse(double p)
 
 double icdf(double p, double av, double sd)
 {
-    return(NormalCDFInverse(p) * sd + av);
+    return NormalCDFInverse(p) * sd + av;
 }
 
 long gaussian_random(long spread, topology_spec_t *spec)
 {
+    long ret;
     static long base = -1;
     static long savedspread;
 
-    if(base == -1 || spread != savedspread)
+    if (base == -1 || spread != savedspread)
     {
         base = -icdf(1.0 / (RAND_MAX + 2.0), 0.0, spread);
         savedspread = spread;
     }
-    // TODO: use FLOAT_RANDOM(spec)!
-    return(base + icdf((rand() + 1.0) / (RAND_MAX + 2.0), 0.0, (double)spread));
+
+    ret = base - spread + icdf((SPEC_RANDOM(spec) + 1.0) / (RAND_MAX + 2.0),
+                               0.0, (double)spread);
+
+    /* handle rare cases of negative results */
+    return (ret < 0) ? 0 : ret;
 }
 
 static step_num topology_choose_offset(topology_spec_t *spec)
@@ -66,9 +71,9 @@ static step_num topology_choose_offset(topology_spec_t *spec)
         (spec->model_type == COLLECTIVE_MODEL_REAL)) {
         switch (spec->model.spread_mode){
         case SPREAD_DISTRIBUTION_UNIFORM:
-            return CYCLIC_RANDOM(spec, spec->model.spread_avg);
+            return CYCLIC_RANDOM(spec, 2 * spec->model.spread_avg);
         case SPREAD_DISTRIBUTION_NORMAL:
-            return gaussian_random(sqrt(spec->model.spread_avg), spec);
+            return gaussian_random(sqrt(2 * spec->model.spread_avg), spec);
         }
     }
     return 0;
@@ -175,6 +180,7 @@ int topology_iterator_next(topology_spec_t *spec,
 
     ret = funcs->next_f(graph, &iterator->in_queue, iterator->ctx, result);
 
+    /* If a (data) packet was sent - update the time this node spent waiting */
     if ((now > topology_max_offset) && (ret == OK) &&
         (result->distance != DISTANCE_NO_PACKET) &&
         ((result->msg % 3) == 0) /* Tree DATA, no Keep-alives */) {

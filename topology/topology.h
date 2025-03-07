@@ -1,17 +1,16 @@
 #include "comm_graph.h"
 
 #ifdef __linux__
-#define CYCLIC_RANDOM(spec, mod) (rand_r(&(spec)->random_seed) % (mod))
-#define FLOAT_RANDOM(spec) (((float)rand_r(&(spec)->random_seed)) / ((float)RAND_MAX))
+#define SPEC_RANDOM(spec) (rand_r(&(spec)->random_seed))
 #elif _WIN32
-#define CYCLIC_RANDOM(spec, mod) (rand() % (mod))
-#define FLOAT_RANDOM(spec) (((float)rand()) / (float)RAND_MAX)
+#define SPEC_RANDOM(spec) (rand())
 #else
 #error "OS not supported!"
 #endif
+#define CYCLIC_RANDOM(spec, mod) (SPEC_RANDOM(spec) % (mod))
+#define FLOAT_RANDOM(spec) (((float)SPEC_RANDOM(spec)) / ((float)RAND_MAX))
 
-typedef enum topology_type
-{
+typedef enum topology_type {
     COLLECTIVE_TOPOLOGY_NARRAY_TREE = 0,
     COLLECTIVE_TOPOLOGY_KNOMIAL_TREE,
     COLLECTIVE_TOPOLOGY_NARRAY_MULTIROOT_TREE,
@@ -24,8 +23,7 @@ typedef enum topology_type
     COLLECTIVE_TOPOLOGY_ALL /* default, must be last */
 } topology_type_t;
 
-typedef enum model_type
-{
+typedef enum model_type {
     COLLECTIVE_MODEL_BASE = 0,      /* Basic collective */
     COLLECTIVE_MODEL_SPREAD,        /* Random start time offset */
     COLLECTIVE_MODEL_NODES_MISSING, /* Random nodes do not take part */
@@ -47,12 +45,12 @@ typedef enum collective_type {
 } collective_type_t;
 
 typedef enum tree_service_cycle_method {
-	TREE_SERVICE_CYCLE_RANDOM = 0,
+	TREE_SERVICE_NONE = 0,
+	TREE_SERVICE_CYCLE_RANDOM,
 	TREE_SERVICE_CYCLE_CALC
 } tree_service_cycle_method_t; // TODO: implement selection
 
-typedef enum tree_recovery_method
-{
+typedef enum tree_recovery_method {
     COLLECTIVE_RECOVERY_FATHER_FIRST = 0,
     COLLECTIVE_RECOVERY_BROTHER_FIRST,
     COLLECTIVE_RECOVERY_CATCH_THE_BUS,
@@ -158,8 +156,7 @@ enum topology_map_slot {
     MAX /* must be last */
 };
 
-typedef struct topo_funcs
-{
+typedef struct topo_funcs {
     size_t (*size_f)();
     int    (*build_f)(topology_spec_t *spec, comm_graph_t **graph);
     int    (*start_f)(topology_spec_t *spec, comm_graph_t *graph, void *internal_ctx);

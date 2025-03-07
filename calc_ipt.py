@@ -10,7 +10,7 @@ import csv
 import subprocess
 from io import StringIO
 
-CMD = "./sim_allreduce --model 1 --latency 0 --reduce-only --iterations 1000 --topology {topo} --procs {procs} --radix {radix} --spread-mode {dist} --spread-avg {expected}"
+CMD = "./sim_allreduce --model {spread} --latency 0 --reduce-only --iterations 1000 --topology {topo} --procs {procs} --radix {radix} --spread-mode {dist} --spread-avg {expected}"
 OUTFILE = "reduce_{tree}_tree_{procs}_radix_{radix}_procs_{dist}_distribution_{expected}_expected_ipt"
 
 TREES = {
@@ -37,6 +37,7 @@ def calc_ipt(num_procs, tree, radix, is_gaussian_distribution, expected):
 
     # Generate the command-line
     cmd_args = {
+        "spread" : int(expected != 0),
         "topo" : TREES[tree],
         "radix" : radix,
         "procs" : num_procs,
@@ -51,10 +52,9 @@ def calc_ipt(num_procs, tree, radix, is_gaussian_distribution, expected):
 
     # Parse the output
     for row in csv.DictReader(StringIO(str(out))):
-        wait_avg = float(row["wait_avg"])
+        res = row["wait_avg"]
 
     # write to a result file
-    res = str(wait_avg / num_procs)
     print(res + " - " + file_name)
     open(file_name, "w").write(res)
 
@@ -66,10 +66,10 @@ if __name__ == "__main__":
         exit(1)
 
     for expected in sys.argv[2:]:
-        for tree in TREES.keys():
+        for dist in (False, True):
             for radix in TREE_RADIXES:
-                calc_ipt(num_procs, tree, radix, False, int(expected))
-                calc_ipt(num_procs, tree, radix, True,  int(expected))
+                for tree in TREES.keys():
+                    calc_ipt(num_procs, tree, radix, dist, int(expected))
 
 #alexm@alexm-laptop ~/workspace/sim_allreduce $ ./sim_allreduce --model 1 --latency 1 --reduce-only --topology 0 --iterations 1000 --procs 1024 --radix 3 --spread-mode 0 --spread-avg 10
 #np,model,topo,radix,spread_mode,spread_avg,off-fail,on-fail,runs,min_steps,max_steps,steps_avg,min_in_spread,max_in_spread,in_spread_avg,min_out_spread,max_out_spread,out_spread_avg,min_msgs,max_msgs,msgs_avg,min_data,max_data,data_avg,min_queue,max_queue,queue_avg,min_dead,max_dead,dead_avg,min_wait,max_wait,wait_avg
